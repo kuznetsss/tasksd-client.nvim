@@ -1,0 +1,213 @@
+local MiniTest = require("mini.test")
+local new_set = MiniTest.new_set
+local eq = MiniTest.expect.equality
+
+local config = require("tasksd.config")
+local health = require("tasksd.health")
+
+-- There is no automated tasksd installation yet, so the integration tests run
+-- against a local build. Override with TASKSD_BIN=/path/to/tasksd.
+local TASKSD = os.getenv("TASKSD_BIN")
+  or vim.fn.expand("~/Documents/rust/tasksd/target/debug/tasksd")
+
+---Skip the current case unless a tasksd binary is available.
+local function needs_tasksd()
+  if vim.fn.executable(TASKSD) == 0 then
+    MiniTest.skip(("no tasksd binary at %s (set TASKSD_BIN)"):format(TASKSD))
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+---Run `health.check()` with `vim.health` swapped for a recorder.
+---
+---`health.lua` looks the functions up on `vim.health` at call time rather than
+---capturing them at load, so replacing the table is enough to intercept every
+---report -- no dependency injection and no child Neovim needed. The original is
+---restored even when the check raises, since leaving a stub behind would break
+---`:checkhealth` for the rest of the run.
+---@return { level: string, msg: string, advice: string[] }[]
+local function run_check()
+  local original = vim.health
+  local entries = {}
+  local function record(level)
+    return function(msg, advice)
+      table.insert(entries, { level = level, msg = tostring(msg), advice = advice or {} })
+    end
+  end
+
+  vim.health = {
+    start = record("start"),
+    ok = record("ok"),
+    info = record("info"),
+    warn = record("warn"),
+    error = record("error"),
+  }
+  local ok, err = pcall(health.check)
+  vim.health = original
+
+  if not ok then
+    error(err)
+  end
+  return entries
+end
+
+---The first entry reported at `level` whose message matches `pattern`.
+local function find(entries, level, pattern)
+  for _, entry in ipairs(entries) do
+    if entry.level == level and entry.msg:find(pattern) then
+      return entry
+    end
+  end
+  return nil
+end
+
+---Whether any entry, at any level, mentions `pattern`.
+local function mentions(entries, pattern)
+  for _, entry in ipairs(entries) do
+    if entry.msg:find(pattern, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+---Whether `entry` carries an advice line containing `pattern`.
+local function advises(entry, pattern)
+  for _, line in ipairs(entry and entry.advice or {}) do
+    if line:find(pattern, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+-- A stand-in for tasksd, so the version cases do not need a real daemon -- and
+-- can cover versions no real daemon would report. Kept in a list and deleted
+-- once, rather than per case, since they are inert files.
+local fakes = {}
+
+---@param output string What the fake prints for `--version`.
+---@param code integer|nil Exit status, default 0.
+---@return string path
+local function fake_tasksd(output, code)
+  local path = vim.fn.tempname()
+  vim.fn.writefile({
+    "#!/bin/sh",
+    ("printf '%%s\\n' %s"):format(vim.fn.shellescape(output)),
+    ("exit %d"):format(code or 0),
+  }, path)
+  vim.fn.setfperm(path, "rwx------")
+  table.insert(fakes, path)
+  return path
+end
+
+--------------------------------------------------------------------------------
+
+local T = new_set({
+  hooks = {
+    pre_case = function()
+      config.current = vim.deepcopy(config.default)
+    end,
+    post_once = function()
+      for _, path in ipairs(fakes) do
+        vim.fn.delete(path)
+      end
+    end,
+  },
+})
+
+--------------------------------------------------------------------------------
+-- The executable
+--------------------------------------------------------------------------------
+
+T["check()"] = new_set()
+
+T["check()"]["reports a missing executable and how to get one"] = function()
+  config.setup({ daemon = { path = "/nonexistent/tasksd" } })
+  local entries = run_check()
+
+  local err = find(entries, "error", "executable not found")
+  MiniTest.expect.no_equality(err, nil)
+  eq(advises(err, "cargo install"), true)
+
+  -- Nothing to run means nothing to ask for a version: the check must stop
+  -- rather than report a second, confusing failure about the same cause.
+  eq(mentions(entries, "client requires"), false)
+end
+
+-- vim.system does not expand ~, so a path that works in a shell fails here with
+-- an ENOENT on a file the user can plainly see. Name it instead.
+T["check()"]["names the unexpanded ~ trap"] = function()
+  config.setup({ daemon = { path = "~/nowhere/tasksd" } })
+  local err = find(run_check(), "error", "executable not found")
+
+  eq(advises(err, "is not expanded"), true)
+end
+
+--------------------------------------------------------------------------------
+-- The version
+--------------------------------------------------------------------------------
+
+T["check()"]["accepts a real tasksd"] = function()
+  needs_tasksd()
+  config.setup({ daemon = { path = TASKSD } })
+  local entries = run_check()
+
+  MiniTest.expect.no_equality(find(entries, "ok", "tasksd executable:"), nil)
+  MiniTest.expect.no_equality(find(entries, "ok", "^tasksd %d"), nil)
+  eq(find(entries, "error", "."), nil)
+end
+
+T["check()"]["parses the version out of the --version line"] = function()
+  config.setup({ daemon = { path = fake_tasksd("tasksd 9.9.9 (abcdef)") } })
+  local ok = find(run_check(), "ok", "^tasksd 9%.9%.9 ")
+
+  MiniTest.expect.no_equality(ok, nil)
+end
+
+-- The same rule the handshake applies, reached through client.check_server_version
+-- so the two can never disagree about what is too old.
+T["check()"]["rejects a daemon older than the client requires"] = function()
+  config.setup({ daemon = { path = fake_tasksd("tasksd 0.0.1") } })
+  local err = find(run_check(), "error", "too old")
+
+  MiniTest.expect.no_equality(err, nil)
+  eq(advises(err, "cargo install"), true)
+end
+
+T["check()"]["warns when nothing version-shaped comes back"] = function()
+  config.setup({ daemon = { path = fake_tasksd("not a version") } })
+
+  MiniTest.expect.no_equality(find(run_check(), "warn", "could not parse a version"), nil)
+end
+
+T["check()"]["reports a --version that fails"] = function()
+  config.setup({ daemon = { path = fake_tasksd("boom", 3) } })
+
+  MiniTest.expect.no_equality(find(run_check(), "error", "could not run"), nil)
+end
+
+--------------------------------------------------------------------------------
+-- The socket
+--------------------------------------------------------------------------------
+
+T["check()"]["reports the socket it would use"] = function()
+  config.setup({ daemon = { path = fake_tasksd("tasksd 9.9.9"), socket = "global" } })
+
+  -- Either level is correct here: whether the file exists depends on whether a
+  -- daemon has ever run, which this case deliberately does not control.
+  eq(mentions(run_check(), "global.sock"), true)
+end
+
+-- socket.path() raises on a scheme it does not know. That is a misconfiguration
+-- to report, not a reason for :checkhealth to blow up mid-render.
+T["check()"]["reports an unresolvable socket scheme"] = function()
+  config.setup({ daemon = { path = fake_tasksd("tasksd 9.9.9"), socket = "session" } })
+
+  MiniTest.expect.no_equality(find(run_check(), "error", "could not resolve the socket path"), nil)
+end
+
+return T

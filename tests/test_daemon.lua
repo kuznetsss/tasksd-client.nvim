@@ -34,6 +34,20 @@ local T = new_set({
 -- argv: pure, no daemon required
 --------------------------------------------------------------------------------
 
+T["executable()"] = new_set()
+
+T["executable()"]["returns the configured path"] = function()
+  config.setup({ daemon = { path = "/bin/tasksd" } })
+  eq(daemon.executable(), "/bin/tasksd")
+end
+
+-- Left as a bare name rather than resolved here: vim.system does the $PATH
+-- lookup, and `tasksd.health` reports on whatever that finds.
+T["executable()"]["falls back to a bare name when path is unset"] = function()
+  config.setup({ daemon = { path = "" } })
+  eq(daemon.executable(), "tasksd")
+end
+
 T["argv()"] = new_set()
 
 T["argv()"]["maps config onto tasksd flags"] = function()

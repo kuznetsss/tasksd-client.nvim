@@ -28,6 +28,22 @@ local function number_arg(value, key)
   return tostring(value)
 end
 
+---The program `spawn` will execute.
+---
+---An empty `daemon.path` means "whatever `tasksd` resolves to on $PATH", which
+---is left to the OS rather than resolved here: `vim.system` does the lookup,
+---and doing it ourselves would only add a way for the two answers to disagree.
+---Split out of `M.argv` so `tasksd.health` can report on the same binary that
+---would actually be launched.
+---@return string
+M.executable = function()
+  local path = config.current.daemon.path
+  if path == nil or path == "" then
+    return "tasksd"
+  end
+  return path
+end
+
 ---Build the argv used to launch tasksd.
 ---Exposed for debugging: `:lua =require("tasksd.daemon").argv("/tmp/s")`
 ---@param socket_path string
@@ -35,14 +51,8 @@ end
 M.argv = function(socket_path)
   local daemon = config.current.daemon
 
-  -- An empty `path` means "whatever `tasksd` resolves to on $PATH".
-  local exe = daemon.path
-  if exe == nil or exe == "" then
-    exe = "tasksd"
-  end
-
   local argv = {
-    exe,
+    M.executable(),
     "--unix-socket-path",
     socket_path,
     "--thread-number",
