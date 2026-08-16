@@ -12,6 +12,49 @@ local CLIENT_VERSION = "0.1.0"
 -- slow machine, not a missing daemon (daemon.ensure rules that out first).
 local HELLO_TIMEOUT_MS = 5000
 
+---The oldest tasksd this client knows how to talk to. Bump it whenever this
+---client starts relying on a daemon feature that did not exist before, so the
+---failure lands once at connect time with an actionable message instead of
+---later, as an unexplained error from whichever request needed the feature.
+---
+---This is a property of the code, not a user preference, so it is a constant
+---here rather than an option in `tasksd.config` -- and it has to be, since
+---`client.lua` deliberately never reads config.
+M.MIN_SERVER_VERSION = "0.2.0"
+
+---Compare a version reported by the daemon against `M.MIN_SERVER_VERSION`.
+---
+---`vim.version` is Neovim's built-in semver implementation: `parse` turns a
+---string into a comparable object (permissive by default -- "v0.2", "0.3.0-rc1"
+---and build metadata are all accepted), and returns nil rather than raising
+---when the string is not a version at all. Note that semver orders a
+---pre-release *below* its release, so "0.3.0-rc1" does not satisfy a 0.3.0
+---minimum.
+---
+---Exposed so the version policy can be tested without a daemon:
+---`:lua =require("tasksd.client").check_server_version("0.1.0")`
+---@param server_version any Whatever the daemon put in the `hello` result.
+---@return string|nil err nil when the version is acceptable.
+M.check_server_version = function(server_version)
+  if type(server_version) ~= "string" then
+    return "tasksd did not report its version in the handshake"
+  end
+  local parsed = vim.version.parse(server_version)
+  if not parsed then
+    return ("tasksd reported an unrecognisable version %q; %s or newer is required"):format(
+      server_version,
+      M.MIN_SERVER_VERSION
+    )
+  end
+  if vim.version.lt(parsed, M.MIN_SERVER_VERSION) then
+    return ("tasksd %s is too old; this client requires %s or newer"):format(
+      server_version,
+      M.MIN_SERVER_VERSION
+    )
+  end
+  return nil
+end
+
 --------------------------------------------------------------------------------
 -- Client object
 --------------------------------------------------------------------------------
@@ -20,7 +63,7 @@ local HELLO_TIMEOUT_MS = 5000
 ---directly, and never handed to a caller in a disconnected state.
 ---@class tasksd.Client
 ---@field socket_path string Socket this client is connected to.
----@field server_version string Version reported by the daemon during the handshake.
+---@field server_version string Version reported by the daemon during the handshake; never older than `M.MIN_SERVER_VERSION`.
 ---@field close_reason string|nil Why the connection ended; nil while it is open.
 ---@field package rpc vim.lsp.rpc.PublicClient
 ---@field package handlers table<string, fun(params: table)>
@@ -161,7 +204,17 @@ local function handshake(socket_path, on_close, on_done)
       finish(nil, ("tasksd rejected the handshake: %s"):format(vim.inspect(err)))
       return
     end
-    self.server_version = result and result.server_version or "unknown"
+    -- A daemon that is too old is a failed connection, not a usable client with
+    -- a caveat: the caller gets nil plus an explanation, exactly as it would for
+    -- a daemon that never answered. Nothing downstream has to re-check.
+    local server_version = result and result.server_version
+    local version_err = M.check_server_version(server_version)
+    if version_err then
+      self:disconnect()
+      finish(nil, version_err)
+      return
+    end
+    self.server_version = server_version
     finish(self, nil)
   end)
 

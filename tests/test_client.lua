@@ -103,7 +103,30 @@ T["connect()"]["reports the daemon version from the handshake"] = function()
 
   eq(type(c.server_version), "string")
   MiniTest.expect.no_equality(c.server_version, "")
+  -- The client only ever hands out a daemon it supports.
+  eq(client.check_server_version(c.server_version), nil)
   c:disconnect()
+end
+
+T["connect()"]["refuses a daemon older than the minimum"] = function()
+  needs_tasksd()
+  local socket = new_socket()
+
+  -- Nothing can install an old tasksd here, so raise the bar instead: the real
+  -- daemon's version is unchanged, but it now fails the check. pcall so a
+  -- failing connect still restores the constant for every later case.
+  local real_minimum = client.MIN_SERVER_VERSION
+  client.MIN_SERVER_VERSION = "999.0.0"
+  local ok, c, err = pcall(connect_sync, socket)
+  client.MIN_SERVER_VERSION = real_minimum
+  eq(ok, true)
+
+  eq(c, nil)
+  eq(type(err) == "string" and err:find("too old", 1, true) ~= nil, true)
+
+  -- The daemon itself is fine and still running; only the handshake was
+  -- refused. Connecting again at the real minimum must succeed.
+  connect_ok(socket):disconnect()
 end
 
 T["connect()"]["reuses a daemon that is already running"] = function()
@@ -146,6 +169,78 @@ T["connect()"]["returns nil and an error when tasksd is missing"] = function()
 
   eq(c, nil)
   eq(type(err) == "string" and err:find("could not launch tasksd", 1, true) ~= nil, true)
+end
+
+--------------------------------------------------------------------------------
+-- check_server_version: the minimum-version policy, no daemon needed
+--------------------------------------------------------------------------------
+
+-- These cases pin the minimum to a fixed value so they stay meaningful when the
+-- real one is bumped. `require` caches modules, so this is the *same* table
+-- every other case in the run sees -- hence the restore in post_once.
+local REAL_MINIMUM = client.MIN_SERVER_VERSION
+
+T["check_server_version()"] = new_set({
+  hooks = {
+    pre_case = function()
+      client.MIN_SERVER_VERSION = "1.2.3"
+    end,
+    post_once = function()
+      client.MIN_SERVER_VERSION = REAL_MINIMUM
+    end,
+  },
+})
+
+---Assert the version is accepted.
+local function accepts(version)
+  eq(client.check_server_version(version), nil)
+end
+
+---Assert the version is rejected, and return the message.
+local function rejects(version)
+  local err = client.check_server_version(version)
+  eq(type(err), "string")
+  return err
+end
+
+T["check_server_version()"]["accepts the minimum and anything newer"] = function()
+  accepts("1.2.3")
+  accepts("1.2.4")
+  accepts("1.3.0")
+  accepts("2.0.0")
+end
+
+T["check_server_version()"]["rejects anything older"] = function()
+  eq(rejects("1.2.2"):find("too old", 1, true) ~= nil, true)
+  rejects("1.1.9")
+  rejects("0.9.0")
+end
+
+-- vim.version.parse is permissive: leading "v", omitted patch, and build
+-- metadata are all fine.
+T["check_server_version()"]["tolerates the loose spellings of a version"] = function()
+  accepts("v1.2.3")
+  accepts("1.3")
+  accepts("1.2.3+build.7")
+end
+
+-- Semver puts a pre-release below its release, so an rc of the minimum does
+-- not satisfy the minimum.
+T["check_server_version()"]["rejects a pre-release of the minimum"] = function()
+  rejects("1.2.3-rc1")
+end
+
+T["check_server_version()"]["rejects a version it cannot parse"] = function()
+  eq(rejects("nightly"):find("unrecognisable", 1, true) ~= nil, true)
+  rejects("")
+end
+
+-- A daemon that answers `hello` without a version is a protocol violation, not
+-- a crash: check_server_version has to survive whatever lands in the result.
+T["check_server_version()"]["rejects a missing or non-string version"] = function()
+  eq(rejects(nil):find("did not report", 1, true) ~= nil, true)
+  rejects(42)
+  rejects({})
 end
 
 --------------------------------------------------------------------------------
