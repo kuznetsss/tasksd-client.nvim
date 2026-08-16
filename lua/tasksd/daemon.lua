@@ -64,6 +64,49 @@ M.argv = function(socket_path)
 end
 
 --------------------------------------------------------------------------------
+-- Addressing
+--------------------------------------------------------------------------------
+
+---Path of the socket shared by every Neovim instance for this user.
+---
+---`stdpath("state")` is Neovim's directory for data that should outlive a
+---restart but is not user-authored config -- the right shelf for a runtime
+---socket. The directory has to exist before tasksd can bind inside it, hence
+---the mkdir; "p" makes it a no-op when it is already there.
+---@return string
+local function global_socket_path()
+  local dir = vim.fs.joinpath(vim.fn.stdpath("state"), "tasksd")
+  vim.fn.mkdir(dir, "p")
+  return vim.fs.joinpath(dir, "global.sock")
+end
+
+---Resolve the `daemon.socket` option into an actual filesystem path.
+---
+---This is the only place that decides which daemon a command talks to, so a
+---caller just asks for "the" socket and gets a consistent answer.
+---Exposed for debugging: `:lua =require("tasksd.daemon").socket_path()`
+---@return string
+M.socket_path = function()
+  local socket = config.current.daemon.socket
+
+  -- A function gets the final say: it is the escape hatch for anyone who wants
+  -- one daemon per project, per git worktree, or whatever else.
+  if type(socket) == "function" then
+    local path = socket()
+    if type(path) ~= "string" or path == "" then
+      error(("daemon.socket returned %s, expected a path"):format(vim.inspect(path)), 0)
+    end
+    return path
+  end
+
+  if socket == "global" then
+    return global_socket_path()
+  end
+
+  error(('daemon.socket must be "global" or a function, got %s'):format(vim.inspect(socket)), 0)
+end
+
+--------------------------------------------------------------------------------
 -- Launching
 --------------------------------------------------------------------------------
 

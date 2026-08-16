@@ -1,5 +1,8 @@
 local log = require("tasksd.log")
 
+---The `:Tasksd` subcommand registry, dispatch, and completion. Each subcommand
+---lives in its own module beside this one and returns a `tasksd.Subcommand`;
+---nothing here knows what any of them do.
 local M = {}
 
 ---A single `:Tasksd` subcommand.
@@ -10,12 +13,7 @@ local M = {}
 
 ---@type table<string, tasksd.Subcommand>
 M.subcommands = {
-  shutdown = {
-    desc = "Shut down the tasksd daemon",
-    impl = function(_args)
-      log.info("`shutdown` is not implemented yet")
-    end,
-  },
+  shutdown = require("tasksd.command.shutdown"),
   start_task = {
     desc = "Start a task on the daemon",
     impl = function(_args)
