@@ -1,4 +1,5 @@
 local config = require("tasksd.config")
+local install = require("tasksd.install")
 
 ---Process control for the tasksd daemon: building its argv, launching it, and
 ---answering "is one listening on this socket?". Nothing here knows about
@@ -30,18 +31,23 @@ end
 
 ---The program `spawn` will execute.
 ---
----An empty `daemon.path` means "whatever `tasksd` resolves to on $PATH", which
----is left to the OS rather than resolved here: `vim.system` does the lookup,
----and doing it ourselves would only add a way for the two answers to disagree.
+---Three candidates, in order: an explicitly configured `daemon.path` always
+---wins, since a user who named a binary means it; then one this plugin
+---installed, so `:Tasksd install` takes effect without any further
+---configuration; then the bare name, leaving the $PATH lookup to `vim.system`
+---rather than duplicating it here where the two answers could disagree.
 ---Split out of `M.argv` so `tasksd.health` can report on the same binary that
 ---would actually be launched.
 ---@return string
 M.executable = function()
   local path = config.current.daemon.path
-  if path == nil or path == "" then
-    return "tasksd"
+  if path ~= nil and path ~= "" then
+    return path
   end
-  return path
+  if install.is_installed() then
+    return install.bin_path()
+  end
+  return "tasksd"
 end
 
 ---Build the argv used to launch tasksd.
@@ -172,14 +178,23 @@ M.ensure = function(socket_path, on_done)
       remove_stale_socket(socket_path)
 
       -- The daemon exiting and the probe succeeding are a race; whichever
-      -- happens first decides the outcome, and the loser is ignored.
+      -- happens first decides the outcome, and the loser is ignored. The guard
+      -- is set synchronously so the race is settled here, not in whichever
+      -- scheduled callback happens to run first.
+      --
+      -- The hop to the main loop belongs here rather than at each call site:
+      -- one of them is vim.system's on_exit, which runs in a fast-event context
+      -- where vim.fn and vim.wait are illegal -- and this function promises its
+      -- caller the opposite.
       local settled = false
       local function finish(ok, err)
         if settled then
           return
         end
         settled = true
-        on_done(ok, err)
+        vim.schedule(function()
+          on_done(ok, err)
+        end)
       end
 
       local spawned, spawn_err = spawn(socket_path, function(out)
@@ -194,13 +209,11 @@ M.ensure = function(socket_path, on_done)
       end
 
       probe_with_retry(socket_path, RETRY_ATTEMPTS, function(ok, err)
-        vim.schedule(function()
-          if ok then
-            finish(true, nil)
-          else
-            finish(false, ("launched tasksd but could not connect: %s"):format(tostring(err)))
-          end
-        end)
+        if ok then
+          finish(true, nil)
+        else
+          finish(false, ("launched tasksd but could not connect: %s"):format(tostring(err)))
+        end
       end)
     end)
   end)

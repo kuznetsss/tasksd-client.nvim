@@ -94,9 +94,12 @@ local fakes = {}
 ---@return string path
 local function fake_tasksd(output, code)
   local path = vim.fn.tempname()
+  -- A failing run writes to stderr, as clap does: that is the stream the health
+  -- check quotes back to the user.
+  local redirect = (code or 0) ~= 0 and " >&2" or ""
   vim.fn.writefile({
     "#!/bin/sh",
-    ("printf '%%s\\n' %s"):format(vim.fn.shellescape(output)),
+    ("printf '%%s\\n' %s%s"):format(vim.fn.shellescape(output), redirect),
     ("exit %d"):format(code or 0),
   }, path)
   vim.fn.setfperm(path, "rwx------")
@@ -178,16 +181,22 @@ T["check()"]["rejects a daemon older than the client requires"] = function()
   eq(advises(err, "cargo install"), true)
 end
 
-T["check()"]["warns when nothing version-shaped comes back"] = function()
+-- A binary that will not say what it is cannot be held to the minimum, so both
+-- of these are errors: the plugin cannot tell whether it would work.
+T["check()"]["reports output that is not version-shaped"] = function()
   config.setup({ daemon = { path = fake_tasksd("not a version") } })
+  local err = find(run_check(), "error", "could not determine the version")
 
-  MiniTest.expect.no_equality(find(run_check(), "warn", "could not parse a version"), nil)
+  MiniTest.expect.no_equality(err, nil)
+  eq(advises(err, "could not parse a version"), true)
 end
 
 T["check()"]["reports a --version that fails"] = function()
   config.setup({ daemon = { path = fake_tasksd("boom", 3) } })
+  local err = find(run_check(), "error", "could not determine the version")
 
-  MiniTest.expect.no_equality(find(run_check(), "error", "could not run"), nil)
+  MiniTest.expect.no_equality(err, nil)
+  eq(advises(err, "boom"), true)
 end
 
 --------------------------------------------------------------------------------

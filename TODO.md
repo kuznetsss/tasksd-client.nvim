@@ -1,0 +1,11 @@
+- [ ] add cargo to nix
+- [ ] binary download install method
+- [ ] connect path and install method
+- [ ] commands:
+    - [ ] start task
+    - [ ] send signal
+    - [ ] send input
+    - [ ] list of tasks
+- [ ] output buffer
+- [ ] picker integration
+- [ ] CI

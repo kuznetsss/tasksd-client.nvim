@@ -1,6 +1,7 @@
 local client = require("tasksd.client")
 local config = require("tasksd.config")
 local daemon = require("tasksd.daemon")
+local install = require("tasksd.install")
 local socket = require("tasksd.socket")
 
 ---What `:checkhealth tasksd` reports.
@@ -14,10 +15,6 @@ local socket = require("tasksd.socket")
 ---The job here is to answer "why did tasksd not start?" before the user has to
 ---ask it: is there a binary, is it new enough, and where would it be talked to.
 local M = {}
-
--- `tasksd --version` is a fast local exec; anything slower than this is broken
--- rather than busy, and :checkhealth should not hang on it.
-local VERSION_TIMEOUT_MS = 2000
 
 local REPO_URL = "https://github.com/kuznetsss/tasksd"
 
@@ -77,30 +74,21 @@ end
 ---Ask the binary its version and hold it to the same rule the handshake uses.
 ---@param exe string
 local function check_version(exe)
-  local ok, out = pcall(function()
-    return vim.system({ exe, "--version" }, { text = true }):wait(VERSION_TIMEOUT_MS)
-  end)
-  if not ok or out.code ~= 0 then
-    vim.health.error(("could not run `%s --version`"):format(exe), {
-      not ok and tostring(out) or vim.trim(out.stderr or ""),
-    })
-    return
-  end
-
-  -- clap prints "tasksd 0.2.0"; take the first token that starts with a digit
-  -- so a future "tasksd 0.3.0 (abcdef)" still parses.
-  local version = vim.trim(out.stdout or ""):match("(%d[%w%.%+%-]*)")
+  -- A binary that will not say what it is cannot be checked against the
+  -- minimum, so this is an error rather than a warning: the plugin has no way
+  -- to tell whether it would work.
+  local version, err = install.version_of(exe)
   if not version then
-    vim.health.warn(("could not parse a version from %q"):format(vim.trim(out.stdout or "")))
+    vim.health.error(("could not determine the version of %s"):format(exe), { tostring(err) })
     return
   end
 
   -- Deliberately the client's own check rather than a second comparison here:
   -- the minimum is a property of the protocol this client speaks, and one copy
   -- of that rule means :checkhealth can never disagree with connect().
-  local err = client.check_server_version(version)
-  if err then
-    vim.health.error(err, install_advice())
+  local unsupported = client.check_server_version(version)
+  if unsupported then
+    vim.health.error(unsupported, install_advice())
     return
   end
 
