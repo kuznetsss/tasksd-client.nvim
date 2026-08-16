@@ -21,9 +21,10 @@ local HELLO_TIMEOUT_MS = 5000
 ---@class tasksd.Client
 ---@field socket_path string Socket this client is connected to.
 ---@field server_version string Version reported by the daemon during the handshake.
+---@field close_reason string|nil Why the connection ended; nil while it is open.
 ---@field package rpc vim.lsp.rpc.PublicClient
 ---@field package handlers table<string, fun(params: table)>
----@field package closed boolean
+---@field package on_close fun(client: tasksd.Client, reason: string)|nil
 local Client = {}
 -- Client is both the metatable of every instance and, via __index, the table
 -- those instances fall back to for method lookup. One shared method table, no
@@ -35,20 +36,25 @@ Client.__index = Client
 ---it cannot exist before the instance does and is assigned by `handshake`
 ---immediately after. Nothing hands a client out before that has happened.
 ---@param socket_path string
+---@param on_close fun(client: tasksd.Client, reason: string)|nil Runs once, when the connection ends.
 ---@return tasksd.Client
-function Client.new(socket_path)
+function Client.new(socket_path, on_close)
   return setmetatable({
     socket_path = socket_path,
     server_version = "",
     handlers = {},
-    closed = false,
+    on_close = on_close,
   }, Client)
 end
 
 ---Is the connection still usable?
+---
+---The transport is the single source of truth. It flips to closing both when we
+---terminate it and when the socket reaches EOF, so a second flag kept here
+---could only ever disagree with it.
 ---@return boolean
 function Client:is_connected()
-  return not self.closed and not self.rpc.is_closing()
+  return not self.rpc.is_closing()
 end
 
 ---Send a JSON-RPC request and receive the response asynchronously.
@@ -84,12 +90,13 @@ function Client:on(method, handler)
   self.handlers[method] = handler
 end
 
----Close the connection. Safe to call more than once.
+---Close the connection. Safe to call more than once: the transport's terminate
+---returns early once it is already closing.
+---
+---This only labels the close; the bookkeeping happens in the `on_exit`
+---dispatcher, which terminate calls on its way out.
 function Client:disconnect()
-  if self.closed then
-    return
-  end
-  self.closed = true
+  self.close_reason = self.close_reason or "closed locally"
   self.rpc.terminate()
 end
 
@@ -99,9 +106,10 @@ end
 
 ---Open the JSON-RPC connection and complete the `hello` handshake.
 ---@param socket_path string
+---@param on_close fun(client: tasksd.Client, reason: string)|nil
 ---@param on_done fun(client: tasksd.Client|nil, err: string|nil)
-local function handshake(socket_path, on_done)
-  local self = Client.new(socket_path)
+local function handshake(socket_path, on_close, on_done)
+  local self = Client.new(socket_path, on_close)
 
   -- Dispatchers close over `self`, so they can be built before rpc exists.
   local dispatchers = {
@@ -109,13 +117,27 @@ local function handshake(socket_path, on_done)
     -- here. Unhandled methods are dropped rather than erroring: the daemon may
     -- legitimately send notifications this client version does not know about.
     notification = function(method, params)
+      -- `shutting_down` is not the disconnect signal -- the EOF right behind it
+      -- is. The daemon may never get to send it (a crash, or a shutdown it has
+      -- to force through), so it only ever explains a close that is already
+      -- coming. Recorded here, then dispatched on like any other notification
+      -- so a caller's own handler still runs.
+      if method == "shutting_down" then
+        self.close_reason = "daemon shut down"
+      end
       local handler = self.handlers[method]
       if handler then
         handler(params)
       end
     end,
+    -- The one place a client is declared dead. vim.lsp.rpc routes every ending
+    -- through the transport's terminate -- our own disconnect, the socket
+    -- reaching EOF, an unparseable message -- and terminate calls this last.
     on_exit = function()
-      self.closed = true
+      self.close_reason = self.close_reason or "connection lost"
+      if self.on_close then
+        self.on_close(self, self.close_reason)
+      end
     end,
   }
 
@@ -158,18 +180,25 @@ end
 ---The callback receives a connected `tasksd.Client`, or nil plus an error
 ---message. It never receives a client that is not ready to use, and it always
 ---runs on the main loop.
+---
+---`on_close` runs once when the connection ends, for any reason, with a short
+---human-readable explanation. It is taken here rather than set on the returned
+---client so that there is no window in which a connection could end before its
+---owner has registered interest.
 ---@param socket_path string
 ---@param on_done fun(client: tasksd.Client|nil, err: string|nil)
-M.connect = function(socket_path, on_done)
+---@param on_close fun(client: tasksd.Client, reason: string)|nil
+M.connect = function(socket_path, on_done, on_close)
   vim.validate("socket_path", socket_path, "string")
   vim.validate("on_done", on_done, "callable")
+  vim.validate("on_close", on_close, "callable", true)
 
   daemon.ensure(socket_path, function(ok, err)
     if not ok then
       on_done(nil, err)
       return
     end
-    handshake(socket_path, on_done)
+    handshake(socket_path, on_close, on_done)
   end)
 end
 
@@ -180,6 +209,10 @@ end
 -- One client per Neovim instance. Which daemon it talks to is the socket
 -- provider's decision (one global tasksd, one per project, ...); by the time a
 -- path reaches here that choice has already been made.
+--
+-- Invariant: this holds a live client or nothing. The on_close hook installed
+-- in M.get clears it the instant the connection ends, so a dead client is never
+-- reachable from here and nothing downstream has to re-validate it.
 ---@type tasksd.Client|nil
 local current = nil
 
@@ -204,15 +237,14 @@ M.get = function(socket_path, on_done)
   vim.validate("socket_path", socket_path, "string")
   vim.validate("on_done", on_done, "callable")
 
-  -- is_connected(), not a nil check: the client goes stale when the daemon
-  -- dies, and the RPC transport flips it to closed. Handing that back would
-  -- wedge the plugin until Neovim restarted.
+  -- A plain nil check is enough: `current` cannot hold a dead client (see the
+  -- invariant above), so there is nothing to re-validate.
   --
   -- The socket_path comparison covers the provider changing its mind mid
   -- session (a per-project provider after :cd, say): the old connection is
   -- dropped rather than silently kept.
   local existing = current
-  if existing and existing:is_connected() and existing.socket_path == socket_path then
+  if existing and existing.socket_path == socket_path then
     vim.schedule(function()
       on_done(existing, nil)
     end)
@@ -220,8 +252,8 @@ M.get = function(socket_path, on_done)
   end
 
   if existing then
+    -- Clears `current` on the way through, via on_close.
     existing:disconnect()
-    current = nil
   end
 
   if waiting then
@@ -248,9 +280,17 @@ M.get = function(socket_path, on_done)
     waiting = nil
     waiting_socket = nil
     -- Only a success is kept; a failure must be retried on the next call.
+    -- This runs synchronously from the handshake result, so the hook below
+    -- cannot have fired for this client yet -- no dead client can land here.
     current = client
     for _, callback in ipairs(queued) do
       callback(client, err)
+    end
+  end, function(client)
+    -- The connection ended, however it ended. Drop it unless something newer
+    -- has already taken its place.
+    if current == client then
+      current = nil
     end
   end)
 end
@@ -258,8 +298,8 @@ end
 ---Drop the connection, disconnecting it. Intended for tests and teardown.
 M.reset = function()
   if current then
+    -- disconnect() clears `current` through the on_close hook.
     current:disconnect()
-    current = nil
   end
 end
 

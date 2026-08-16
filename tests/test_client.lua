@@ -181,6 +181,53 @@ T["Client"]["disconnect is idempotent"] = function()
   eq(c:is_connected(), false)
 end
 
+-- The three ways a connection can end. All of them arrive through the same
+-- on_exit dispatcher; close_reason is what tells them apart afterwards.
+
+T["Client"]["labels a local disconnect"] = function()
+  needs_tasksd()
+  local c = connect_ok(new_socket())
+  eq(c.close_reason, nil)
+
+  c:disconnect()
+
+  eq(c.close_reason, "closed locally")
+end
+
+T["Client"]["labels a deliberate daemon shutdown"] = function()
+  needs_tasksd()
+  local c = connect_ok(new_socket())
+
+  c:request("shutdown", {}, function() end)
+
+  -- The `shutting_down` notification lands before the EOF, so by the time the
+  -- connection reports closed the reason is already recorded.
+  eq(
+    vim.wait(5000, function()
+      return not c:is_connected()
+    end, 20),
+    true
+  )
+  eq(c.close_reason, "daemon shut down")
+end
+
+T["Client"]["labels a lost connection"] = function()
+  needs_tasksd()
+  local socket = new_socket()
+  local c = connect_ok(socket)
+
+  -- SIGKILL: no shutting_down notification, nothing but the EOF.
+  vim.fn.system({ "kill", "-9", pid_for(socket) })
+
+  eq(
+    vim.wait(5000, function()
+      return not c:is_connected()
+    end, 20),
+    true
+  )
+  eq(c.close_reason, "connection lost")
+end
+
 T["Client"]["round-trips a request to the daemon"] = function()
   needs_tasksd()
   local c = connect_ok(new_socket())
@@ -282,6 +329,26 @@ T["get()"]["reconnects when the cached client has died"] = function()
   local second = get_ok(socket)
   eq(second:is_connected(), true)
   MiniTest.expect.no_equality(first, second)
+end
+
+-- The cache has to survive the case nobody tells it about: a daemon that dies
+-- without warning. Nothing calls reset() here -- the client has to evict itself.
+T["get()"]["reconnects after the daemon is killed"] = function()
+  needs_tasksd()
+  local socket = new_socket()
+
+  local first = get_ok(socket)
+  vim.fn.system({ "kill", "-9", pid_for(socket) })
+  eq(
+    vim.wait(5000, function()
+      return not first:is_connected()
+    end, 20),
+    true
+  )
+
+  local second = get_ok(socket)
+  MiniTest.expect.no_equality(first, second)
+  eq(second:is_connected(), true)
 end
 
 -- One client per Neovim instance, but the socket provider may change its mind
