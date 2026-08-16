@@ -1,12 +1,22 @@
 local M = {}
 
-M.default = {}
+M.default = {
+  daemon = {
+    path = "", -- path to tasksd executable
+    thread_number = 2,
+    task_buffer_size = 10000, -- lines
+    graceful_period = 5, -- seconds
+    log_file = nil, -- logging disabled by default
+    socket = "global", -- 'session' or function()->string
+    detached = true,
+  },
+}
 
-M.config = vim.deepcopy(M.default)
+M.current = vim.deepcopy(M.default)
 
 ---@param opts table|nil
 M.setup = function(opts)
-  M.config = vim.tbl_deep_extend("force", M.default, opts or {})
+  M.current = vim.tbl_deep_extend("force", M.default, opts or {})
 end
 
 return M

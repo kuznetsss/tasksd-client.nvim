@@ -30,6 +30,7 @@
             neovim
           ];
           shellHook = ''
+            export MINI_NVIM="${pkgs.vimPlugins.mini-nvim}"
             echo "tasksd-client.nvim devshell — run 'just' to list recipes"
           '';
         };

@@ -8,12 +8,6 @@ local M = {}
 
 ---@type table<string, tasksd.Subcommand>
 M.subcommands = {
-  start = {
-    desc = "Start the tasksd daemon",
-    impl = function(_args)
-      vim.notify("tasksd: `start` is not implemented yet", vim.log.levels.INFO)
-    end,
-  },
   shutdown = {
     desc = "Shut down the tasksd daemon",
     impl = function(_args)

@@ -1,7 +1,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Lua sources that stylua/selene operate on.
-srcs := "lua plugin"
+srcs := "lua plugin tests"
 # Scratch dir for lua-language-server logs / reports (gitignored).
 build := ".build"
 
@@ -30,6 +30,12 @@ typecheck:
         --checklevel=Warning \
         --configpath=.luarc.json \
         --logpath={{ build }}/luals
+
+# Run the test suite with mini.test
+test *ARGS:
+    @test -n "${MINI_NVIM:-}" \
+      || { echo "MINI_NVIM is unset — enter the devshell (direnv allow / nix develop)"; exit 1; }
+    nvim --headless -u tests/minimal_init.lua -c 'lua MiniTest.run()' {{ ARGS }}
 
 # Run every static check
 check: fmt-check lint typecheck
