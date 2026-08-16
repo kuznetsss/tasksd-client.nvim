@@ -1,3 +1,5 @@
+local log = require("tasksd.log")
+
 local M = {}
 
 ---A single `:Tasksd` subcommand.
@@ -11,13 +13,13 @@ M.subcommands = {
   shutdown = {
     desc = "Shut down the tasksd daemon",
     impl = function(_args)
-      vim.notify("tasksd: `shutdown` is not implemented yet", vim.log.levels.INFO)
+      log.info("`shutdown` is not implemented yet")
     end,
   },
   start_task = {
     desc = "Start a task on the daemon",
     impl = function(_args)
-      vim.notify("tasksd: `start_task` is not implemented yet", vim.log.levels.INFO)
+      log.info("`start_task` is not implemented yet")
     end,
   },
 }
@@ -37,21 +39,14 @@ M.run = function(opts)
   local name = fargs[1]
 
   if not name then
-    vim.notify(
-      "Tasksd: expected a subcommand, one of: " .. table.concat(M.names(), ", "),
-      vim.log.levels.ERROR
-    )
+    log.error("expected a subcommand, one of: " .. table.concat(M.names(), ", "))
     return
   end
 
   local subcommand = M.subcommands[name]
   if not subcommand then
-    vim.notify(
-      ("Tasksd: unknown subcommand `%s`, expected one of: %s"):format(
-        name,
-        table.concat(M.names(), ", ")
-      ),
-      vim.log.levels.ERROR
+    log.error(
+      ("unknown subcommand `%s`, expected one of: %s"):format(name, table.concat(M.names(), ", "))
     )
     return
   end
