@@ -1,6 +1,6 @@
 local client = require("tasksd.client")
-local daemon = require("tasksd.daemon")
 local log = require("tasksd.log")
+local socket = require("tasksd.socket")
 
 ---`:Tasksd shutdown` -- ask the daemon to stop.
 ---
@@ -10,10 +10,10 @@ local log = require("tasksd.log")
 return {
   desc = "Shut down the tasksd daemon",
   impl = function(_args)
-    -- socket_path raises on a bad `daemon.socket` setting. A misconfigured
+    -- socket.path raises on a bad `daemon.socket` setting. A misconfigured
     -- option is the user's problem to fix, so it becomes a message rather
     -- than a stack trace out of a command callback.
-    local ok, socket_path = pcall(daemon.socket_path)
+    local ok, socket_path = pcall(socket.path)
     if not ok then
       log.error(tostring(socket_path))
       return

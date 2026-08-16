@@ -7,7 +7,13 @@ M.default = {
     task_buffer_size = 10000, -- lines
     graceful_period = 5, -- seconds
     log_file = nil, -- logging disabled by default
-    socket = "global", -- 'session' or function()->string
+    -- Which daemon to talk to; see `tasksd.socket`.
+    --   'global'        -- one daemon for every Neovim instance
+    --   'nvim_instance' -- one daemon per Neovim instance
+    --   'pwd'           -- one daemon per working directory
+    --   'project'       -- one daemon per version control root above it
+    --   function() -> string -- a path of your own
+    socket = "global",
     detached = true,
   },
 }
