@@ -1,0 +1,6 @@
+# Standard library is defined in ./vim.yml (LuaJIT + the `vim` global).
+std = "vim"
+
+[lints]
+# Neovim plugins legitimately mutate module tables at load time.
+mixed_table = "allow"

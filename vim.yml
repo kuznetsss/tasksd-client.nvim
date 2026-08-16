@@ -1,0 +1,13 @@
+---
+# Selene standard library for Neovim plugins: Lua 5.1 (LuaJIT) plus Neovim's
+# `vim` global. Field-level typing of `vim.*` is left to lua-language-server;
+# selene only needs to know the global exists.
+base: lua51
+
+globals:
+  vim:
+    any: true
+  jit:
+    any: true
+  bit:
+    any: true
