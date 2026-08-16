@@ -1,3 +1,7 @@
 .direnv/
 .envrc.local
 .build/
+
+# Claude Code
+.claude/
+CLAUDE.md
