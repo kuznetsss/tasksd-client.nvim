@@ -14,7 +14,6 @@ local TASKSD = os.getenv("TASKSD_BIN")
 -- Helpers
 --------------------------------------------------------------------------------
 
----Skip the current case unless a tasksd binary is available.
 local function needs_tasksd()
   if vim.fn.executable(TASKSD) == 0 then
     MiniTest.skip(("no tasksd binary at %s (set TASKSD_BIN)"):format(TASKSD))
@@ -33,7 +32,6 @@ local function new_socket()
   return path
 end
 
----Run the asynchronous client.connect to completion.
 ---@return tasksd.Client|nil, string|nil
 local function connect_sync(socket)
   local done, result, err = false, nil, nil
@@ -49,8 +47,7 @@ local function connect_sync(socket)
   return result, err
 end
 
----Like connect_sync, for the cases that are expected to succeed. Fails the test
----with the underlying error rather than a nil-index traceback.
+---Fails with the underlying error rather than a nil-index traceback.
 ---@return tasksd.Client
 local function connect_ok(socket)
   local c, err = connect_sync(socket)
@@ -112,9 +109,8 @@ T["connect()"]["refuses a daemon older than the minimum"] = function()
   needs_tasksd()
   local socket = new_socket()
 
-  -- Nothing can install an old tasksd here, so raise the bar instead: the real
-  -- daemon's version is unchanged, but it now fails the check. pcall so a
-  -- failing connect still restores the constant for every later case.
+  -- Nothing can install an old tasksd here, so raise the bar instead. pcall so
+  -- a failing connect still restores the constant for every later case.
   local real_minimum = client.MIN_SERVER_VERSION
   client.MIN_SERVER_VERSION = "999.0.0"
   local ok, c, err = pcall(connect_sync, socket)
@@ -124,8 +120,7 @@ T["connect()"]["refuses a daemon older than the minimum"] = function()
   eq(c, nil)
   eq(type(err) == "string" and err:find("too old", 1, true) ~= nil, true)
 
-  -- The daemon itself is fine and still running; only the handshake was
-  -- refused. Connecting again at the real minimum must succeed.
+  -- Only the handshake was refused; the daemon is still running and usable.
   connect_ok(socket):disconnect()
 end
 
@@ -138,7 +133,6 @@ T["connect()"]["reuses a daemon that is already running"] = function()
   first:disconnect()
 
   local second = connect_ok(socket)
-  -- Same daemon, not a second one.
   eq(pid_for(socket), pid)
   second:disconnect()
 end
@@ -175,9 +169,9 @@ end
 -- check_server_version: the minimum-version policy, no daemon needed
 --------------------------------------------------------------------------------
 
--- These cases pin the minimum to a fixed value so they stay meaningful when the
--- real one is bumped. `require` caches modules, so this is the *same* table
--- every other case in the run sees -- hence the restore in post_once.
+-- Pinned to a fixed value so these cases stay meaningful when the real minimum
+-- is bumped. `require` caches modules, so this is the *same* table every other
+-- case in the run sees -- hence the restore in post_once.
 local REAL_MINIMUM = client.MIN_SERVER_VERSION
 
 T["check_server_version()"] = new_set({
@@ -191,12 +185,11 @@ T["check_server_version()"] = new_set({
   },
 })
 
----Assert the version is accepted.
 local function accepts(version)
   eq(client.check_server_version(version), nil)
 end
 
----Assert the version is rejected, and return the message.
+---Returns the rejection message, for the cases that check its wording.
 local function rejects(version)
   local err = client.check_server_version(version)
   eq(type(err), "string")
@@ -216,16 +209,12 @@ T["check_server_version()"]["rejects anything older"] = function()
   rejects("0.9.0")
 end
 
--- vim.version.parse is permissive: leading "v", omitted patch, and build
--- metadata are all fine.
 T["check_server_version()"]["tolerates the loose spellings of a version"] = function()
   accepts("v1.2.3")
   accepts("1.3")
   accepts("1.2.3+build.7")
 end
 
--- Semver puts a pre-release below its release, so an rc of the minimum does
--- not satisfy the minimum.
 T["check_server_version()"]["rejects a pre-release of the minimum"] = function()
   rejects("1.2.3-rc1")
 end
@@ -235,8 +224,8 @@ T["check_server_version()"]["rejects a version it cannot parse"] = function()
   rejects("")
 end
 
--- A daemon that answers `hello` without a version is a protocol violation, not
--- a crash: check_server_version has to survive whatever lands in the result.
+-- A protocol violation must not become a nil-index crash: whatever lands in the
+-- `hello` result has to be survivable.
 T["check_server_version()"]["rejects a missing or non-string version"] = function()
   eq(rejects(nil):find("did not report", 1, true) ~= nil, true)
   rejects(42)
@@ -276,8 +265,8 @@ T["Client"]["disconnect is idempotent"] = function()
   eq(c:is_connected(), false)
 end
 
--- The three ways a connection can end. All of them arrive through the same
--- on_exit dispatcher; close_reason is what tells them apart afterwards.
+-- The three ways a connection can end. All arrive through the same on_exit
+-- dispatcher; close_reason is what tells them apart afterwards.
 
 T["Client"]["labels a local disconnect"] = function()
   needs_tasksd()
@@ -355,7 +344,6 @@ T["get()"] = new_set({
   },
 })
 
----Run the asynchronous client.get to completion.
 local function get_sync(socket)
   local done, result, err = false, nil, nil
   client.get(socket, function(c, e)
@@ -370,7 +358,6 @@ local function get_sync(socket)
   return result, err
 end
 
----get_sync for the cases expected to succeed.
 ---@return tasksd.Client
 local function get_ok(socket)
   local c, err = get_sync(socket)
@@ -426,8 +413,7 @@ T["get()"]["reconnects when the cached client has died"] = function()
   MiniTest.expect.no_equality(first, second)
 end
 
--- The cache has to survive the case nobody tells it about: a daemon that dies
--- without warning. Nothing calls reset() here -- the client has to evict itself.
+-- Nothing calls reset() here: the client has to evict itself.
 T["get()"]["reconnects after the daemon is killed"] = function()
   needs_tasksd()
   local socket = new_socket()
@@ -446,8 +432,7 @@ T["get()"]["reconnects after the daemon is killed"] = function()
   eq(second:is_connected(), true)
 end
 
--- One client per Neovim instance, but the socket provider may change its mind
--- mid-session (a per-project provider after :cd, for example).
+-- What a per-project socket provider does after :cd.
 T["get()"]["replaces the client when the socket path changes"] = function()
   needs_tasksd()
   local first = get_ok(new_socket())
@@ -466,8 +451,6 @@ T["get()"]["does not cache a failure"] = function()
   eq(first, nil)
   MiniTest.expect.no_equality(err, nil)
 
-  -- With a working binary the next call must retry rather than serve the
-  -- cached failure.
   needs_tasksd()
   config.setup({ daemon = { path = TASKSD } })
   local second = get_sync(socket)

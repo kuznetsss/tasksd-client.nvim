@@ -8,9 +8,8 @@ local T = new_set()
 
 T["completion"] = new_set()
 
--- Asserted against command.names() rather than a hardcoded list: this test is
--- about the completion being wired up at all, and should not need editing every
--- time a subcommand is added or removed.
+-- Against command.names() rather than a hardcoded list, so adding a subcommand
+-- does not mean editing this case.
 T["completion"]["offers every subcommand"] = function()
   eq(vim.fn.getcompletion("Tasksd ", "cmdline"), command.names())
 end

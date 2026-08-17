@@ -49,7 +49,6 @@ M.run = function(opts)
     return
   end
 
-  -- Hand over every argument after the subcommand name.
   subcommand.impl(vim.list_slice(fargs, 2))
 end
 
@@ -58,8 +57,8 @@ end
 ---@param cmd_line string The whole command line as typed so far.
 ---@return string[]
 M.complete = function(arg_lead, cmd_line, _cursor_pos)
-  -- A subcommand is "settled" once it is followed by whitespace: at that point
-  -- we are completing its arguments, not the subcommand name itself.
+  -- Trailing whitespace means the subcommand name is finished, so what is being
+  -- completed now is its arguments.
   local settled = cmd_line:match("^%s*Tasksd%s+(%S+)%s")
 
   if settled then

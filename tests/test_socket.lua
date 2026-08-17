@@ -13,9 +13,8 @@ local function cd(dir)
   vim.cmd.cd(vim.fn.fnameescape(dir))
 end
 
--- Every case here is pure path arithmetic: no daemon is started, so no cleanup
--- is needed. `config.current` and the working directory are the two pieces of
--- global state a case can leave behind, so both are restored.
+-- No daemon is started anywhere in this file, so `config.current` and the
+-- working directory are the only global state a case can leave behind.
 local original_cwd = vim.fn.getcwd(-1)
 
 local T = new_set({
@@ -55,8 +54,6 @@ T["path()"]["names the nvim_instance socket after this process"] = function()
   eq(vim.fs.basename(socket.path()), ("nvim-%d.sock"):format(vim.uv.os_getpid()))
 end
 
--- The whole point of the scheme: :cd somewhere else and you address a different
--- daemon. The hash makes that true without putting slashes in a file name.
 T["path()"]["follows the global working directory"] = function()
   config.setup({ daemon = { socket = "pwd" } })
 
@@ -72,9 +69,8 @@ T["path()"]["follows the global working directory"] = function()
   MiniTest.expect.no_equality(first, second)
 end
 
--- ...and the other half of the point: a window-local directory must not.
 -- `client.get` drops the live connection whenever this answer changes, so a
--- scheme that moved with the cursor would kill subscriptions on a window hop.
+-- scheme that followed :lcd would kill subscriptions on a window hop.
 T["path()"]["ignores a window-local directory"] = function()
   config.setup({ daemon = { socket = "pwd" } })
 
@@ -89,8 +85,8 @@ T["path()"]["ignores a window-local directory"] = function()
   eq(actual, expected)
 end
 
--- Sandboxes, not the real repo: tempname() sits under Neovim's own temp
--- directory, so nothing above it holds a marker that could sway the result.
+-- tempname() sits under Neovim's own temp directory, so no ancestor holds a
+-- marker that could sway the result -- unlike anywhere inside the real repo.
 ---@return string root, string deep
 local function project_tree()
   local root = vim.fn.tempname()
@@ -99,8 +95,6 @@ local function project_tree()
   return root, deep
 end
 
--- The difference from `pwd`, and the reason the scheme exists: where you
--- happened to start Neovim inside the tree must not matter.
 T["path()"]["shares one socket across a project tree"] = function()
   config.setup({ daemon = { socket = "project" } })
   local root, deep = project_tree()
@@ -149,8 +143,6 @@ T["path()"]["rejects a function that returns no path"] = function()
   MiniTest.expect.error(socket.path, "expected a path")
 end
 
--- A path the kernel would truncate binds to the wrong name instead of failing,
--- which is far harder to diagnose than an error here.
 T["path()"]["rejects a path longer than sun_path"] = function()
   config.setup({
     daemon = {

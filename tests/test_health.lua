@@ -10,7 +10,6 @@ local health = require("tasksd.health")
 local TASKSD = os.getenv("TASKSD_BIN")
   or vim.fn.expand("~/Documents/rust/tasksd/target/debug/tasksd")
 
----Skip the current case unless a tasksd binary is available.
 local function needs_tasksd()
   if vim.fn.executable(TASKSD) == 0 then
     MiniTest.skip(("no tasksd binary at %s (set TASKSD_BIN)"):format(TASKSD))
@@ -24,10 +23,9 @@ end
 ---Run `health.check()` with `vim.health` swapped for a recorder.
 ---
 ---`health.lua` looks the functions up on `vim.health` at call time rather than
----capturing them at load, so replacing the table is enough to intercept every
----report -- no dependency injection and no child Neovim needed. The original is
----restored even when the check raises, since leaving a stub behind would break
----`:checkhealth` for the rest of the run.
+---capturing them at load, so replacing the table intercepts every report -- no
+---dependency injection and no child Neovim needed. Restored even when the check
+---raises, since a leftover stub would break `:checkhealth` for the whole run.
 ---@return { level: string, msg: string, advice: string[] }[]
 local function run_check()
   local original = vim.health
@@ -54,7 +52,6 @@ local function run_check()
   return entries
 end
 
----The first entry reported at `level` whose message matches `pattern`.
 local function find(entries, level, pattern)
   for _, entry in ipairs(entries) do
     if entry.level == level and entry.msg:find(pattern) then
@@ -64,7 +61,6 @@ local function find(entries, level, pattern)
   return nil
 end
 
----Whether any entry, at any level, mentions `pattern`.
 local function mentions(entries, pattern)
   for _, entry in ipairs(entries) do
     if entry.msg:find(pattern, 1, true) then
@@ -74,7 +70,6 @@ local function mentions(entries, pattern)
   return false
 end
 
----Whether `entry` carries an advice line containing `pattern`.
 local function advises(entry, pattern)
   for _, line in ipairs(entry and entry.advice or {}) do
     if line:find(pattern, 1, true) then
@@ -84,9 +79,8 @@ local function advises(entry, pattern)
   return false
 end
 
--- A stand-in for tasksd, so the version cases do not need a real daemon -- and
--- can cover versions no real daemon would report. Kept in a list and deleted
--- once, rather than per case, since they are inert files.
+-- Stand-ins for tasksd, so the version cases can cover versions no real daemon
+-- would report.
 local fakes = {}
 
 ---@param output string What the fake prints for `--version`.
@@ -142,7 +136,7 @@ T["check()"]["reports a missing executable and how to get one"] = function()
 end
 
 -- vim.system does not expand ~, so a path that works in a shell fails here with
--- an ENOENT on a file the user can plainly see. Name it instead.
+-- an ENOENT on a file the user can plainly see.
 T["check()"]["names the unexpanded ~ trap"] = function()
   config.setup({ daemon = { path = "~/nowhere/tasksd" } })
   local err = find(run_check(), "error", "executable not found")
@@ -171,8 +165,8 @@ T["check()"]["parses the version out of the --version line"] = function()
   MiniTest.expect.no_equality(ok, nil)
 end
 
--- The same rule the handshake applies, reached through client.check_server_version
--- so the two can never disagree about what is too old.
+-- Reached through client.check_server_version, so :checkhealth and the
+-- handshake can never disagree about what is too old.
 T["check()"]["rejects a daemon older than the client requires"] = function()
   config.setup({ daemon = { path = fake_tasksd("tasksd 0.0.1") } })
   local err = find(run_check(), "error", "too old")
@@ -181,8 +175,8 @@ T["check()"]["rejects a daemon older than the client requires"] = function()
   eq(advises(err, "cargo install"), true)
 end
 
--- A binary that will not say what it is cannot be held to the minimum, so both
--- of these are errors: the plugin cannot tell whether it would work.
+-- Errors, not warnings: a binary that will not say what it is cannot be held to
+-- the minimum at all.
 T["check()"]["reports output that is not version-shaped"] = function()
   config.setup({ daemon = { path = fake_tasksd("not a version") } })
   local err = find(run_check(), "error", "could not determine the version")
@@ -211,8 +205,8 @@ T["check()"]["reports the socket it would use"] = function()
   eq(mentions(run_check(), "global.sock"), true)
 end
 
--- socket.path() raises on a scheme it does not know. That is a misconfiguration
--- to report, not a reason for :checkhealth to blow up mid-render.
+-- socket.path() raises on an unknown scheme, which must not blow up
+-- :checkhealth mid-render.
 T["check()"]["reports an unresolvable socket scheme"] = function()
   config.setup({ daemon = { path = fake_tasksd("tasksd 9.9.9"), socket = "session" } })
 

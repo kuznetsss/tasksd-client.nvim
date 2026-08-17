@@ -4,26 +4,18 @@ local daemon = require("tasksd.daemon")
 local install = require("tasksd.install")
 local socket = require("tasksd.socket")
 
----What `:checkhealth tasksd` reports.
+---What `:checkhealth tasksd` reports: is there a binary, is it new enough, and
+---which daemon would this Neovim address.
 ---
----Neovim finds this by name: `:checkhealth {name}` looks for `lua/{name}/health.lua`
----on the runtimepath and calls its `check()`. There is nothing to register and
----nothing to call from `setup()` -- the file existing at this path *is* the
----registration. Everything runs synchronously into a scratch buffer, so unlike
----`setup()` this is a context where blocking on a subprocess is acceptable.
----
----The job here is to answer "why did tasksd not start?" before the user has to
----ask it: is there a binary, is it new enough, and where would it be talked to.
+---Nothing registers this. `:checkhealth {name}` looks for `lua/{name}/health.lua`
+---on the runtimepath and calls its `check()` -- the file existing at this path
+---*is* the registration.
 local M = {}
 
 local REPO_URL = "https://github.com/kuznetsss/tasksd"
 
----How to obtain a tasksd, given what this machine can use.
----
----Prebuilt archives are published for Linux only, so on every other platform
----offering the releases page would just send the user to a page with nothing
----they can run. `vim.uv.os_uname().sysname` is the libuv view of `uname -s`:
----"Linux", "Darwin", "Windows_NT".
+---Prebuilt archives are published for Linux only, so offering the releases page
+---anywhere else sends the user to a page with nothing they can run.
 ---@return string[]
 local function install_advice()
   local advice = {
@@ -39,20 +31,18 @@ local function install_advice()
   return advice
 end
 
----Locate the binary and report on it.
 local function check_executable()
   local exe = daemon.executable()
 
-  -- exepath() answers both questions this needs, in the same way the OS will:
-  -- given a bare name it searches $PATH, given a path it checks that the file
-  -- is there and executable. Either way "" means "nothing to run".
+  -- exepath() resolves the same way the OS will: a bare name is searched on
+  -- $PATH, a path is checked for existence and the executable bit. Either way
+  -- "" means nothing to run.
   local resolved = vim.fn.exepath(exe)
   if resolved == "" then
     local advice = install_advice()
 
-    -- A path typed with a leading ~ is a trap worth naming: the shell expands
-    -- it, but `vim.system` does not, so the spawn would fail with a confusing
-    -- ENOENT on a filename that visibly exists.
+    -- The shell expands a leading ~ but `vim.system` does not, so the spawn
+    -- would fail with ENOENT on a filename that visibly exists.
     if exe:sub(1, 1) == "~" then
       table.insert(
         advice,
@@ -71,21 +61,18 @@ local function check_executable()
   return resolved
 end
 
----Ask the binary its version and hold it to the same rule the handshake uses.
 ---@param exe string
 local function check_version(exe)
-  -- A binary that will not say what it is cannot be checked against the
-  -- minimum, so this is an error rather than a warning: the plugin has no way
-  -- to tell whether it would work.
+  -- An error rather than a warning: a binary that will not say what it is
+  -- cannot be checked against the minimum at all.
   local version, err = install.version_of(exe)
   if not version then
     vim.health.error(("could not determine the version of %s"):format(exe), { tostring(err) })
     return
   end
 
-  -- Deliberately the client's own check rather than a second comparison here:
-  -- the minimum is a property of the protocol this client speaks, and one copy
-  -- of that rule means :checkhealth can never disagree with connect().
+  -- The client's own check rather than a second comparison here, so
+  -- :checkhealth can never disagree with connect().
   local unsupported = client.check_server_version(version)
   if unsupported then
     vim.health.error(unsupported, install_advice())
@@ -97,7 +84,6 @@ local function check_version(exe)
   )
 end
 
----Report which daemon this Neovim would address, and whether its socket exists.
 local function check_socket()
   local scheme = config.current.daemon.socket
   vim.health.info(

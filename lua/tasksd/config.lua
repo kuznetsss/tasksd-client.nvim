@@ -2,11 +2,11 @@ local M = {}
 
 M.default = {
   daemon = {
-    path = "", -- path to tasksd executable
+    path = "",
     thread_number = 2,
     task_buffer_size = 10000, -- lines
     graceful_period = 5, -- seconds
-    log_file = nil, -- logging disabled by default
+    log_file = nil,
     -- Which daemon to talk to; see `tasksd.socket`.
     --   'global'        -- one daemon for every Neovim instance
     --   'nvim_instance' -- one daemon per Neovim instance

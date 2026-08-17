@@ -9,10 +9,8 @@ local install = require("tasksd.install")
 -- Helpers
 --------------------------------------------------------------------------------
 
--- Nothing in this file reaches the network or builds anything: every case is a
--- pure argv question, or runs a shell script standing in for tasksd. A case
--- that really built from source would take minutes and need a Rust toolchain --
--- see the notes on gating that behind an env var in CI.
+-- Nothing here reaches the network or builds anything: every case is a pure
+-- argv question, or runs a shell script standing in for tasksd.
 local temps = {}
 
 ---Write an executable stand-in for tasksd that prints `output` and exits `code`.
@@ -55,11 +53,9 @@ local function empty_root()
   return root
 end
 
----Run `fn` with the install root redirected.
----
----`root()` is the single place every other path goes through -- `bin_path` and
----`cargo_argv` both call it -- so stubbing it redirects the whole module away
----from the real ~/.local/share/nvim without any test-only option in the code.
+---`bin_path` and `cargo_argv` both call `root()`, so stubbing that one function
+---redirects the whole module away from the real ~/.local/share/nvim without any
+---test-only option in the code.
 local function with_root(root, fn)
   local original = install.root
   ---@diagnostic disable-next-line: duplicate-set-field
@@ -84,7 +80,6 @@ local function with_method(method, spec, fn)
   end
 end
 
----Run the asynchronous install.run to completion.
 ---@return boolean ok, string|nil err
 local function run_sync(method)
   local done, ok, err = false, false, nil
@@ -115,7 +110,6 @@ local function has_flag(argv, flag)
   return vim.tbl_contains(argv, flag)
 end
 
----Assert that `text` mentions `pattern`.
 ---tostring() rather than indexing directly, so a nil error message fails the
 ---assertion instead of raising a nil-index inside the test.
 local function expect_contains(text, pattern)
@@ -140,16 +134,14 @@ local T = new_set({
 
 T["pin"] = new_set()
 
--- The invariant that makes pinning safe: installing the pinned version must
--- produce a daemon the handshake will accept. Bumping MIN_SERVER_VERSION past
--- the pin would otherwise ship a plugin whose own installer yields a daemon it
--- then refuses to talk to.
+-- Bumping MIN_SERVER_VERSION past the pin would ship a plugin whose own
+-- installer yields a daemon it then refuses to talk to.
 T["pin"]["satisfies the version the client requires"] = function()
   eq(client.check_server_version(install.PINNED_VERSION), nil)
 end
 
--- A full hash, not an abbreviation: short hashes can become ambiguous as a
--- repository grows, and cargo would then fail on an install that used to work.
+-- Short hashes become ambiguous as a repository grows, breaking installs that
+-- previously resolved.
 T["pin"]["names a full commit hash"] = function()
   eq(#install.PINNED_REV, 40)
   MiniTest.expect.no_equality(install.PINNED_REV:match("^%x+$"), nil)
@@ -161,8 +153,8 @@ end
 
 T["bin_path()"] = new_set()
 
--- stdpath("data"), not the plugin's own directory: a plugin manager updating
--- the plugin must not delete the binary.
+-- Not the plugin's own directory: a plugin manager updating the plugin must not
+-- delete the binary.
 T["bin_path()"]["lives under stdpath('data')"] = function()
   eq(vim.startswith(install.bin_path(), vim.fn.stdpath("data")), true)
 end
@@ -200,15 +192,12 @@ T["cargo_argv()"]["installs the pinned commit into the plugin's own root"] = fun
   MiniTest.expect.no_equality(flag_value(argv, "--git"), nil)
 end
 
--- Regression, and the reason the pin is a commit at all: given both --tag and
--- --rev, cargo takes the tag and drops the rev silently. An install carrying
--- both would look hash-pinned while quietly following a movable tag.
+-- Given both, cargo takes the tag and drops the rev silently, so an install
+-- carrying both looks hash-pinned while quietly following a movable tag.
 T["cargo_argv()"]["never passes --tag alongside --rev"] = function()
   eq(has_flag(install.cargo_argv(), "--tag"), false)
 end
 
--- --locked builds what tasksd's CI builds; --force makes a repeated install
--- mean "reinstall", not "refuse because something is already there".
 T["cargo_argv()"]["builds reproducibly and overwrites"] = function()
   local argv = install.cargo_argv()
 
@@ -267,9 +256,8 @@ T["verify()"]["fails when nothing was installed"] = function()
   end)
 end
 
--- The check that keeps PINNED_REV and PINNED_VERSION honest: a commit that
--- builds a different version than the one this client expects is a mistake in
--- the pin, and it must not pass silently.
+-- A commit that builds a different version than this client expects is a
+-- mistake in the pin, and must not pass silently.
 T["verify()"]["fails when the built version is not the pinned one"] = function()
   with_root(fake_root("tasksd 0.0.1"), function()
     local ok, err = install.verify()
@@ -302,8 +290,8 @@ T["run()"]["rejects an unknown method and lists the real ones"] = function()
   expect_contains(err, "cargo")
 end
 
--- The point of the guard: a missing toolchain has to read as "install Rust",
--- not as whatever a failed spawn happens to say.
+-- A missing toolchain has to read as "install Rust", not as whatever a failed
+-- spawn happens to say.
 T["run()"]["explains a missing toolchain before spawning anything"] = function()
   with_method("__test", {
     desc = "test method",
@@ -337,8 +325,7 @@ T["run()"]["passes an installer's own error through"] = function()
   end)
 end
 
--- An installer exiting 0 has only proved that *it* is happy, so success is
--- reported only once the binary it left behind checks out.
+-- An installer exiting 0 has only proved that *it* is happy.
 T["run()"]["succeeds when the installer leaves a matching binary"] = function()
   with_root(fake_root("tasksd " .. install.PINNED_VERSION), function()
     with_method("__test", {

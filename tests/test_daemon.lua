@@ -37,11 +37,11 @@ local T = new_set({
 
 T["executable()"] = new_set()
 
----Run `fn` with `tasksd.install` pretending a binary is (or is not) installed.
+---Run `fn` with `tasksd.install` pretending a binary is (or is not) installed,
+---so the result does not depend on whether this machine has a real one.
 ---
 ---`daemon.lua` calls these through the module table at call time, so replacing
----the fields is enough -- and it keeps the cases from depending on whether the
----machine running them happens to have a real installation.
+---the fields is enough.
 ---@param path string|nil nil means "nothing installed".
 local function with_installed(path, fn)
   local is_installed, bin_path = install.is_installed, install.bin_path
@@ -61,7 +61,6 @@ local function with_installed(path, fn)
   end
 end
 
--- A user who names a binary means it, even if :Tasksd install put one nearby.
 T["executable()"]["prefers the configured path over an installed binary"] = function()
   config.setup({ daemon = { path = "/bin/tasksd" } })
   with_installed("/managed/bin/tasksd", function()
@@ -76,8 +75,7 @@ T["executable()"]["uses an installed binary when path is unset"] = function()
   end)
 end
 
--- Left as a bare name rather than resolved here: vim.system does the $PATH
--- lookup, and `tasksd.health` reports on whatever that finds.
+-- Bare rather than resolved: vim.system does the $PATH lookup.
 T["executable()"]["falls back to a bare name when nothing is installed"] = function()
   config.setup({ daemon = { path = "" } })
   with_installed(nil, function()
@@ -105,9 +103,8 @@ T["argv()"]["maps config onto tasksd flags"] = function()
   eq(flag_value(argv, "--graceful-period"), "11")
 end
 
--- Stubbed rather than left to chance: argv[1] comes from executable(), which
--- prefers a plugin-installed binary -- so on a machine that has run
--- `:Tasksd install` the unstubbed answer is a path, not a bare name.
+-- Stubbed because executable() prefers a plugin-installed binary, so on a
+-- machine that has run `:Tasksd install` the answer is a path, not a bare name.
 T["argv()"]["takes its program from executable()"] = function()
   config.setup({ daemon = { path = "" } })
   with_installed(nil, function()
@@ -118,8 +115,8 @@ T["argv()"]["takes its program from executable()"] = function()
   end)
 end
 
--- Regression: a renamed or misspelled option used to reach the daemon as the
--- literal string "nil", which tasksd rejected with an opaque clap error.
+-- Unchecked, a renamed or misspelled option reaches the daemon as the literal
+-- string "nil", which tasksd rejects with an opaque clap error.
 T["argv()"]["rejects a non-numeric option instead of passing nil"] = function()
   config.setup({ daemon = { path = TASKSD, thread_number = "many" } })
   MiniTest.expect.error(function()
@@ -133,14 +130,10 @@ end
 
 T["ensure()"] = new_set()
 
--- Regression. `ensure` promises its callback runs on the main loop, but the
--- early-exit path used to hand it straight out of vim.system's on_exit, which
--- Neovim runs in a |fast-event| context -- where vim.fn and vim.wait raise
--- E5560. Callers log from that callback, so the failure only showed up when a
--- daemon died right after launching.
---
--- /bin/sh stands in for a binary that spawns fine and then rejects tasksd's
--- flags: exactly the shape of that path.
+-- The early-exit path runs out of vim.system's on_exit, a |fast-event| context
+-- where vim.fn and vim.wait raise E5560. Callers log from this callback, so a
+-- missing hop to the main loop only bites when a daemon dies right after
+-- launching. /bin/sh spawns fine and then rejects tasksd's flags: that shape.
 T["ensure()"]["hands its callback back on the main loop"] = function()
   config.setup({ daemon = { path = "/bin/sh" } })
   local socket_path = ("/tmp/tasksd-nvim-test-ensure-%d.sock"):format(vim.uv.os_getpid())
@@ -149,8 +142,8 @@ T["ensure()"]["hands its callback back on the main loop"] = function()
   local done, ok, fast_context_err = false, nil, nil
   daemon.ensure(socket_path, function(o)
     ok = o
-    -- Anything vimscript-backed is illegal in a fast-event context; if the
-    -- callback arrives there, this raises instead of returning a path.
+    -- Vimscript-backed, so this raises rather than returning a path if the
+    -- callback arrived in a fast-event context.
     local called, err = pcall(vim.fn.tempname)
     fast_context_err = not called and tostring(err) or nil
     done = true

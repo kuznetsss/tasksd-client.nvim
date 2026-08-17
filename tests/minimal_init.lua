@@ -1,8 +1,6 @@
--- Minimal Neovim config used only by the test suite.
---
--- Nothing of the user's own configuration is loaded: the runtimepath gets this
--- plugin and mini.nvim and nothing else, so a test failure is always about this
--- code rather than an interaction with some other plugin.
+-- The runtimepath gets this plugin and mini.nvim and nothing else, so a test
+-- failure is always about this code rather than an interaction with some other
+-- plugin.
 
 vim.opt.runtimepath:append(vim.uv.cwd())
 
