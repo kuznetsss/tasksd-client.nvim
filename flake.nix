@@ -28,6 +28,7 @@
             selene
             lua-language-server
             neovim
+            rustup
           ];
           shellHook = ''
             export MINI_NVIM="${pkgs.vimPlugins.mini-nvim}"

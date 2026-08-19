@@ -13,6 +13,7 @@ local M = {}
 
 ---@type table<string, tasksd.Subcommand>
 M.subcommands = {
+  install = require("tasksd.command.install"),
   shutdown = require("tasksd.command.shutdown"),
   start_task = {
     desc = "Start a task on the daemon",

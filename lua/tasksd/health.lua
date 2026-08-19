@@ -31,33 +31,35 @@ local function install_advice()
   return advice
 end
 
+---@type table<tasksd.ExeSource, string>
+local SOURCE_LABEL = {
+  config = "daemon.path",
+  installed = "installed by this plugin",
+  env = "found on $PATH",
+}
+
 local function check_executable()
-  local exe = daemon.executable()
+  local exe, source = daemon.executable()
+
+  -- Falling back is quiet at launch time, so a path the user believes is in
+  -- effect but is not has to surface somewhere.
+  local configured = config.current.daemon.path
+  if configured ~= nil and configured ~= "" and source ~= "config" then
+    vim.health.warn(("daemon.path = %q is not executable, so it was ignored"):format(configured), {
+      "Point it at a tasksd binary, or unset it to use whichever one this plugin finds",
+    })
+  end
 
   -- exepath() resolves the same way the OS will: a bare name is searched on
   -- $PATH, a path is checked for existence and the executable bit. Either way
   -- "" means nothing to run.
   local resolved = vim.fn.exepath(exe)
   if resolved == "" then
-    local advice = install_advice()
-
-    -- The shell expands a leading ~ but `vim.system` does not, so the spawn
-    -- would fail with ENOENT on a filename that visibly exists.
-    if exe:sub(1, 1) == "~" then
-      table.insert(
-        advice,
-        1,
-        ("daemon.path = %q is not expanded; write the full path, or use vim.fn.expand()"):format(
-          exe
-        )
-      )
-    end
-
-    vim.health.error(("tasksd executable not found: %s"):format(exe), advice)
+    vim.health.error(("tasksd executable not found: %s"):format(exe), install_advice())
     return nil
   end
 
-  vim.health.ok(("tasksd executable: %s"):format(resolved))
+  vim.health.ok(("tasksd executable: %s (%s)"):format(resolved, SOURCE_LABEL[source]))
   return resolved
 end
 

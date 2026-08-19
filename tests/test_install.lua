@@ -2,6 +2,7 @@ local MiniTest = require("mini.test")
 local new_set = MiniTest.new_set
 local eq = MiniTest.expect.equality
 
+local auto = require("tasksd.install.auto")
 local cargo = require("tasksd.install.cargo")
 local client = require("tasksd.client")
 local github = require("tasksd.install.github")
@@ -86,17 +87,20 @@ local function with_method(name, method, fn)
 end
 
 ---A method that does nothing but whatever `install` does.
----@param install_fn fun(done: fun(ok: boolean, err: string|nil))
+---@param install_fn fun(done: fun(ok: boolean, err: string|nil), report: fun(msg: string))
 ---@return tasksd.InstallMethod
 local function method_installing(install_fn)
   return { desc = "test method", install = install_fn }
 end
 
----@return boolean ok, string|nil err
+---@return boolean ok, string|nil err, string[] reports
 local function run_sync(method)
   local done, ok, err = false, false, nil
+  local reports = {}
   install.run(method, function(o, e)
     done, ok, err = true, o, e
+  end, function(msg)
+    table.insert(reports, msg)
   end)
 
   local finished = vim.wait(5000, function()
@@ -105,7 +109,7 @@ local function run_sync(method)
   if not finished then
     error("install.run never invoked its callback")
   end
-  return ok, err
+  return ok, err, reports
 end
 
 ---@return string|nil
@@ -343,13 +347,18 @@ end
 T["github.install()"]["refuses an unsupported platform without downloading"] = function()
   with_unsupported_platform(function()
     local called, ok, err = false, nil, nil
+    local reports = {}
     github.install(function(o, e)
       called, ok, err = true, o, e
+    end, function(msg)
+      table.insert(reports, msg)
     end)
 
     eq(called, true)
     eq(ok, false)
     expect_contains(err, "Plan9 pdp11")
+    -- Announcing a download it then refuses to make would be a lie.
+    eq(reports, {})
   end)
 end
 
@@ -504,6 +513,9 @@ T["run()"]["rejects an unknown method and lists the real ones"] = function()
   eq(ok, false)
   expect_contains(err, "unknown install method")
   expect_contains(err, "cargo")
+  -- The only place a method's `desc` is ever rendered, so nothing else would
+  -- catch one going stale.
+  expect_contains(err, install.methods.cargo.desc)
 end
 
 T["run()"]["passes a method's own error through"] = function()
@@ -556,6 +568,52 @@ T["run()"]["succeeds when a method leaves a matching binary"] = function()
   end)
 end
 
+T["run()"]["forwards a method's progress to the caller"] = function()
+  with_root(fake_root("tasksd " .. pin.VERSION), function()
+    with_method(
+      "__test",
+      method_installing(function(done, report)
+        report("halfway there")
+        done(true, nil)
+      end),
+      function()
+        local ok, _, reports = run_sync("__test")
+
+        eq(ok, true)
+        eq(reports, { "halfway there" })
+      end
+    )
+  end)
+end
+
+-- `on_report` is optional, so a method narrating to a caller that asked for
+-- nothing must not raise.
+T["run()"]["tolerates a caller that wants no progress"] = function()
+  with_root(fake_root("tasksd " .. pin.VERSION), function()
+    with_method(
+      "__test",
+      method_installing(function(done, report)
+        report("nobody is listening")
+        done(true, nil)
+      end),
+      function()
+        local done, ok = false, false
+        install.run("__test", function(o)
+          done, ok = true, o
+        end)
+
+        eq(
+          vim.wait(5000, function()
+            return done
+          end, 10),
+          true
+        )
+        eq(ok, true)
+      end
+    )
+  end)
+end
+
 -- vim.system calls back in a fast-event context, where verify() -- which execs
 -- and waits -- is not allowed to run.
 T["run()"]["verifies on the main loop after a spawning method"] = function()
@@ -573,6 +631,166 @@ T["run()"]["verifies on the main loop after a spawning method"] = function()
       end
     )
   end)
+end
+
+--------------------------------------------------------------------------------
+-- auto
+--------------------------------------------------------------------------------
+
+T["auto"] = new_set()
+
+---`with_method` cannot stand in: it clears the name afterwards, which would
+---unregister the real method rather than restore it.
+---@param outcomes table<string, { ok: boolean, err: string|nil, says: string|nil }>
+---@param fn fun(tried: string[])
+local function with_outcomes(outcomes, fn)
+  local originals, tried = {}, {}
+
+  for name, outcome in pairs(outcomes) do
+    originals[name] = install.methods[name]
+    install.methods[name] = method_installing(function(done, report)
+      table.insert(tried, name)
+      if outcome.says then
+        report(outcome.says)
+      end
+      done(outcome.ok, outcome.err)
+    end)
+  end
+
+  local ok, err = pcall(fn, tried)
+
+  for name, original in pairs(originals) do
+    install.methods[name] = original
+  end
+  if not ok then
+    error(err)
+  end
+end
+
+---@return boolean ok, string|nil err, string[] reports
+local function auto_sync()
+  local done, ok, err = false, false, nil
+  local reports = {}
+  auto.install(function(o, e)
+    done, ok, err = true, o, e
+  end, function(msg)
+    table.insert(reports, msg)
+  end)
+
+  local finished = vim.wait(5000, function()
+    return done
+  end, 10)
+  if not finished then
+    error("auto.install never invoked its callback")
+  end
+  return ok, err, reports
+end
+
+---@param reports string[]
+---@return string
+local function joined(reports)
+  return table.concat(reports, "\n")
+end
+
+-- Seconds versus minutes, so the order is the whole point of the method.
+T["auto"]["tries the release before the source build"] = function()
+  eq(auto.ORDER, { "github", "cargo" })
+end
+
+T["auto"]["would recurse if it listed itself"] = function()
+  eq(vim.tbl_contains(auto.ORDER, "auto"), false)
+end
+
+T["auto"]["names only real methods"] = function()
+  for _, name in ipairs(auto.ORDER) do
+    MiniTest.expect.no_equality(install.methods[name], nil)
+  end
+end
+
+T["auto"]["stops at the first method that succeeds"] = function()
+  with_outcomes({
+    github = { ok = true },
+    cargo = { ok = false, err = "should never run" },
+  }, function(tried)
+    local ok, err = auto_sync()
+
+    eq(ok, true)
+    eq(err, nil)
+    eq(tried, { "github" })
+  end)
+end
+
+T["auto"]["falls back to cargo when there is no release for this machine"] = function()
+  with_outcomes({
+    github = { ok = false, err = "publishes no binary for Darwin arm64" },
+    cargo = { ok = true },
+  }, function(tried)
+    local ok, err = auto_sync()
+
+    eq(ok, true)
+    eq(err, nil)
+    eq(tried, { "github", "cargo" })
+  end)
+end
+
+-- Reporting only the last failure would send a user with neither a release nor
+-- a toolchain down a road the other message has already ruled out.
+T["auto"]["reports every method's failure"] = function()
+  with_outcomes({
+    github = { ok = false, err = "publishes no binary for Darwin arm64" },
+    cargo = { ok = false, err = "cargo is not on $PATH" },
+  }, function()
+    local ok, err = auto_sync()
+
+    eq(ok, false)
+    expect_contains(err, "no install method succeeded")
+    expect_contains(err, "github")
+    expect_contains(err, "Darwin arm64")
+    expect_contains(err, "cargo")
+    expect_contains(err, "not on %$PATH")
+  end)
+end
+
+-- Switching methods is otherwise invisible: the user sees a silence that is
+-- really a source build.
+T["auto"]["says why it moved on and what it moved to"] = function()
+  with_outcomes({
+    github = { ok = false, err = "publishes no binary for Darwin arm64" },
+    cargo = { ok = true },
+  }, function()
+    local _, _, reports = auto_sync()
+    local said = joined(reports)
+
+    expect_contains(said, "github")
+    expect_contains(said, "Darwin arm64")
+    expect_contains(said, "trying `cargo`")
+  end)
+end
+
+-- The failure is in `combined_error`, which the caller is about to log.
+T["auto"]["does not narrate the last failure twice"] = function()
+  with_outcomes({
+    github = { ok = false, err = "no release" },
+    cargo = { ok = false, err = "no toolchain" },
+  }, function()
+    local _, _, reports = auto_sync()
+
+    eq(joined(reports):find("no toolchain", 1, true), nil)
+  end)
+end
+
+T["auto"]["passes its reporter down to the method it runs"] = function()
+  with_outcomes({ github = { ok = true, says = "downloading the archive" } }, function()
+    local _, _, reports = auto_sync()
+
+    expect_contains(joined(reports), "downloading the archive")
+  end)
+end
+
+-- Reached through install.run, so `auto` gets verified like any other method.
+T["auto"]["is registered as a method"] = function()
+  eq(install.methods.auto.install, auto.install)
+  eq(vim.tbl_contains(install.method_names(), "auto"), true)
 end
 
 --------------------------------------------------------------------------------

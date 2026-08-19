@@ -152,7 +152,8 @@ M.check_sha256 = function(path, target)
 end
 
 ---@param done fun(ok: boolean, err: string|nil)
-M.install = function(done)
+---@param report fun(msg: string)
+M.install = function(done, report)
   local install = require("tasksd.install")
 
   local target, target_err = M.release_target()
@@ -186,6 +187,8 @@ M.install = function(done)
     done(finished, finish_err)
   end
 
+  report(("downloading %s"):format(M.asset_url(target)))
+
   vim.net.request(M.asset_url(target), { outpath = archive }, function(request_err)
     -- Both callbacks below arrive in a fast-event context, where the rest of
     -- this -- hashing, unpacking, vim.fn -- may not run.
@@ -195,12 +198,14 @@ M.install = function(done)
         return
       end
 
+      report("verifying the archive against its pinned digest")
       local checked, check_err = M.check_sha256(archive, target)
       if not checked then
         finish(false, check_err)
         return
       end
 
+      report("unpacking")
       vim.fn.mkdir(unpacked, "p")
       install.spawn({ "tar", "-xzf", archive, "-C", unpacked }, function(extracted, tar_err)
         vim.schedule(function()

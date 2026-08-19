@@ -1,5 +1,5 @@
-- [ ] binary download install method
-- [ ] add cargo to nix
+- [x] binary download install method
+- [x] add cargo to nix
 - [ ] connect path and install method
 - [ ] commands:
     - [ ] start task

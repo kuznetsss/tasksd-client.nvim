@@ -54,11 +54,11 @@ M.version_of = function(exe)
   return version, nil
 end
 
----@alias tasksd.InstallMethodName "cargo"|"github"
+---@alias tasksd.InstallMethodName "auto"|"cargo"|"github"
 
 ---@class tasksd.InstallMethod
----@field desc string One-line description, for `:Tasksd install` completion.
----@field install fun(done: fun(ok: boolean, err: string|nil)) Checks its own preconditions first. `done` may arrive in a fast-event context.
+---@field desc string One-line description, listed when a method is named that does not exist.
+---@field install fun(done: fun(ok: boolean, err: string|nil), report: fun(msg: string)) Checks its own preconditions first. `done` may arrive in a fast-event context, and `report` is safe to call from one.
 
 ---Programs a method needs, in one message shape so every method reports a
 ---missing dependency the same way.
@@ -98,6 +98,7 @@ end
 ---a command line, so `M.run` has to be able to look up a non-method.
 ---@type table<string, tasksd.InstallMethod>
 M.methods = {
+  auto = require("tasksd.install.auto").method,
   cargo = require("tasksd.install.cargo").method,
   github = require("tasksd.install.github").method,
 }
@@ -110,14 +111,36 @@ M.method_names = function()
   return names
 end
 
+---@return string
+local function method_lines()
+  local lines = {}
+  for _, name in ipairs(M.method_names()) do
+    table.insert(lines, ("  %s -- %s"):format(name, M.methods[name].desc))
+  end
+  return table.concat(lines, "\n")
+end
+
 ---A method reporting success has only proved that *it* is happy, so `verify`
 ---runs here rather than inside one: no method can skip it.
 ---@param name string A `tasksd.InstallMethodName`, or whatever the user typed.
 ---@param on_done fun(ok: boolean, err: string|nil) Runs on the main loop.
-M.run = function(name, on_done)
+---@param on_report? fun(msg: string) Progress narration. Runs on the main loop.
+M.run = function(name, on_done, on_report)
   local function finish(ok, err)
     vim.schedule(function()
       on_done(ok, err)
+    end)
+  end
+
+  -- Scheduled like `finish`, so a method may narrate from the fast-event
+  -- context its own callbacks arrive in, and so what it says stays ordered
+  -- against the result.
+  local function report(msg)
+    if not on_report then
+      return
+    end
+    vim.schedule(function()
+      on_report(msg)
     end)
   end
 
@@ -125,10 +148,7 @@ M.run = function(name, on_done)
   if not method then
     finish(
       false,
-      ("unknown install method `%s`, expected one of: %s"):format(
-        tostring(name),
-        table.concat(M.method_names(), ", ")
-      )
+      ("unknown install method `%s`; available methods:\n%s"):format(tostring(name), method_lines())
     )
     return
   end
@@ -143,7 +163,7 @@ M.run = function(name, on_done)
     vim.schedule(function()
       on_done(M.verify())
     end)
-  end)
+  end, report)
 end
 
 ---Catches `pin.REV` being updated without `pin.VERSION` beside it.

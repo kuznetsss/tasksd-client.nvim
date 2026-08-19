@@ -28,7 +28,7 @@ end
 ---@type tasksd.InstallMethod
 M.method = {
   desc = "Build from source with cargo",
-  install = function(done)
+  install = function(done, report)
     local install = require("tasksd.install")
 
     local ok, err =
@@ -38,6 +38,7 @@ M.method = {
       return
     end
 
+    report(("building tasksd %s from source; this takes a few minutes"):format(pin.VERSION))
     install.spawn(M.argv(), done)
   end,
 }

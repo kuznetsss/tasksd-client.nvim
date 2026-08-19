@@ -27,21 +27,30 @@ local function number_arg(value, key)
   return tostring(value)
 end
 
----A configured `daemon.path`, else one this plugin installed, else the bare
----name for `vim.system` to resolve on $PATH.
+---@alias tasksd.ExeSource "config"|"installed"|"env"
+
+---A `daemon.path` that resolves to something runnable, else one this plugin
+---installed, else the bare name for `vim.system` to resolve on $PATH.
 ---
 ---Split out of `M.argv` so `tasksd.health` can report on the same binary that
----would actually be launched.
----@return string
+---would actually be launched, and so an install can tell whether the user is
+---already supplying their own.
+---@return string exe
+---@return tasksd.ExeSource source
 M.executable = function()
   local path = config.current.daemon.path
   if path ~= nil and path ~= "" then
-    return path
+    -- vim.system hands argv[0] to the OS untouched, so a shell-style ~ or $VAR
+    -- would reach it unexpanded and fail on a file that visibly exists.
+    local expanded = vim.fs.normalize(path)
+    if vim.fn.executable(expanded) == 1 then
+      return expanded, "config"
+    end
   end
   if install.is_installed() then
-    return install.bin_path()
+    return install.bin_path(), "installed"
   end
-  return "tasksd"
+  return "tasksd", "env"
 end
 
 ---@param socket_path string

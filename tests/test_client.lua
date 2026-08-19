@@ -4,6 +4,7 @@ local eq = MiniTest.expect.equality
 
 local client = require("tasksd.client")
 local config = require("tasksd.config")
+local install = require("tasksd.install")
 
 -- There is no automated tasksd installation yet, so the integration tests run
 -- against a local build. Override with TASKSD_BIN=/path/to/tasksd.
@@ -17,6 +18,26 @@ local TASKSD = os.getenv("TASKSD_BIN")
 local function needs_tasksd()
   if vim.fn.executable(TASKSD) == 0 then
     MiniTest.skip(("no tasksd binary at %s (set TASKSD_BIN)"):format(TASKSD))
+  end
+end
+
+---Run `fn` with both of the fallbacks behind `daemon.path` taken away, so a
+---case about an unlaunchable daemon fails the same on a machine that has a
+---tasksd installed or on $PATH as on one that has neither.
+local function with_no_tasksd(fn)
+  local is_installed, path = install.is_installed, assert(vim.uv.os_getenv("PATH"))
+  ---@diagnostic disable-next-line: duplicate-set-field
+  install.is_installed = function()
+    return false
+  end
+  vim.uv.os_setenv("PATH", "/nonexistent")
+
+  local ok, err = pcall(fn)
+
+  install.is_installed = is_installed
+  vim.uv.os_setenv("PATH", path)
+  if not ok then
+    error(err)
   end
 end
 
@@ -159,7 +180,10 @@ end
 T["connect()"]["returns nil and an error when tasksd is missing"] = function()
   config.setup({ daemon = { path = "/nonexistent/tasksd" } })
 
-  local c, err = connect_sync(new_socket())
+  local c, err
+  with_no_tasksd(function()
+    c, err = connect_sync(new_socket())
+  end)
 
   eq(c, nil)
   eq(type(err) == "string" and err:find("could not launch tasksd", 1, true) ~= nil, true)
@@ -447,7 +471,10 @@ T["get()"]["does not cache a failure"] = function()
   config.setup({ daemon = { path = "/nonexistent/tasksd" } })
   local socket = new_socket()
 
-  local first, err = get_sync(socket)
+  local first, err
+  with_no_tasksd(function()
+    first, err = get_sync(socket)
+  end)
   eq(first, nil)
   MiniTest.expect.no_equality(err, nil)
 

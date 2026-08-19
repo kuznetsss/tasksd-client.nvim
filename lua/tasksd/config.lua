@@ -16,6 +16,14 @@ M.default = {
     socket = "global",
     detached = true,
   },
+  install = {
+    -- Which method `:Tasksd install` uses when given no argument; see
+    -- `tasksd.install`.
+    --   'auto'   -- download a release, else build from source
+    --   'github' -- download a prebuilt release binary
+    --   'cargo'  -- build from source
+    method = "auto",
+  },
 }
 
 M.current = vim.deepcopy(M.default)

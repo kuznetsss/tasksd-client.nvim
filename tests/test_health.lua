@@ -4,6 +4,7 @@ local eq = MiniTest.expect.equality
 
 local config = require("tasksd.config")
 local health = require("tasksd.health")
+local install = require("tasksd.install")
 
 -- There is no automated tasksd installation yet, so the integration tests run
 -- against a local build. Override with TASKSD_BIN=/path/to/tasksd.
@@ -79,6 +80,26 @@ local function advises(entry, pattern)
   return false
 end
 
+---Run `fn` with both of the fallbacks behind `daemon.path` taken away, so a
+---case about an unusable path reports the same on a machine that has run
+---`:Tasksd install` as on one that has not.
+local function with_no_tasksd(fn)
+  local is_installed, path = install.is_installed, assert(vim.uv.os_getenv("PATH"))
+  ---@diagnostic disable-next-line: duplicate-set-field
+  install.is_installed = function()
+    return false
+  end
+  vim.uv.os_setenv("PATH", "/nonexistent")
+
+  local ok, err = pcall(fn)
+
+  install.is_installed = is_installed
+  vim.uv.os_setenv("PATH", path)
+  if not ok then
+    error(err)
+  end
+end
+
 -- Stand-ins for tasksd, so the version cases can cover versions no real daemon
 -- would report.
 local fakes = {}
@@ -124,7 +145,10 @@ T["check()"] = new_set()
 
 T["check()"]["reports a missing executable and how to get one"] = function()
   config.setup({ daemon = { path = "/nonexistent/tasksd" } })
-  local entries = run_check()
+  local entries
+  with_no_tasksd(function()
+    entries = run_check()
+  end)
 
   local err = find(entries, "error", "executable not found")
   MiniTest.expect.no_equality(err, nil)
@@ -135,13 +159,23 @@ T["check()"]["reports a missing executable and how to get one"] = function()
   eq(mentions(entries, "client requires"), false)
 end
 
--- vim.system does not expand ~, so a path that works in a shell fails here with
--- an ENOENT on a file the user can plainly see.
-T["check()"]["names the unexpanded ~ trap"] = function()
-  config.setup({ daemon = { path = "~/nowhere/tasksd" } })
-  local err = find(run_check(), "error", "executable not found")
+-- Falling back to another binary is silent at launch time, so :checkhealth is
+-- the only place the user learns their setting is not in effect.
+T["check()"]["warns that an unusable daemon.path was ignored"] = function()
+  config.setup({ daemon = { path = "/nonexistent/tasksd" } })
+  local warning = find(run_check(), "warn", "/nonexistent/tasksd.*was ignored")
 
-  eq(advises(err, "is not expanded"), true)
+  MiniTest.expect.no_equality(warning, nil)
+end
+
+T["check()"]["names which of the three sources won"] = function()
+  config.setup({ daemon = { path = fake_tasksd("tasksd 9.9.9") } })
+  MiniTest.expect.no_equality(find(run_check(), "ok", "%(daemon%.path%)"), nil)
+
+  config.setup({ daemon = { path = "" } })
+  with_no_tasksd(function()
+    eq(find(run_check(), "warn", "was ignored"), nil)
+  end)
 end
 
 --------------------------------------------------------------------------------

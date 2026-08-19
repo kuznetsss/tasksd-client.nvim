@@ -62,16 +62,16 @@ local function with_installed(path, fn)
 end
 
 T["executable()"]["prefers the configured path over an installed binary"] = function()
-  config.setup({ daemon = { path = "/bin/tasksd" } })
+  config.setup({ daemon = { path = "/bin/sh" } })
   with_installed("/managed/bin/tasksd", function()
-    eq(daemon.executable(), "/bin/tasksd")
+    eq({ daemon.executable() }, { "/bin/sh", "config" })
   end)
 end
 
 T["executable()"]["uses an installed binary when path is unset"] = function()
   config.setup({ daemon = { path = "" } })
   with_installed("/managed/bin/tasksd", function()
-    eq(daemon.executable(), "/managed/bin/tasksd")
+    eq({ daemon.executable() }, { "/managed/bin/tasksd", "installed" })
   end)
 end
 
@@ -79,8 +79,36 @@ end
 T["executable()"]["falls back to a bare name when nothing is installed"] = function()
   config.setup({ daemon = { path = "" } })
   with_installed(nil, function()
-    eq(daemon.executable(), "tasksd")
+    eq({ daemon.executable() }, { "tasksd", "env" })
   end)
+end
+
+-- A path that cannot be launched is worth less than one that can, so it loses
+-- to a binary this plugin installed rather than guaranteeing an ENOENT.
+T["executable()"]["ignores a configured path with nothing behind it"] = function()
+  config.setup({ daemon = { path = "/nonexistent/tasksd" } })
+  with_installed("/managed/bin/tasksd", function()
+    eq({ daemon.executable() }, { "/managed/bin/tasksd", "installed" })
+  end)
+  with_installed(nil, function()
+    eq({ daemon.executable() }, { "tasksd", "env" })
+  end)
+end
+
+-- A shell expands ~, vim.system does not, so an unexpanded path would be
+-- rejected as unrunnable on a file the user can plainly see.
+T["executable()"]["expands ~ in the configured path"] = function()
+  local exe =
+    vim.fs.joinpath(vim.uv.os_homedir(), (".tasksd-nvim-test-exe-%d"):format(vim.uv.os_getpid()))
+  vim.fn.writefile({ "#!/bin/sh", "exit 0" }, exe)
+  vim.fn.setfperm(exe, "rwx------")
+
+  config.setup({ daemon = { path = "~/" .. vim.fs.basename(exe) } })
+  local resolved, source = daemon.executable()
+  vim.fn.delete(exe)
+
+  eq(resolved, exe)
+  eq(source, "config")
 end
 
 T["argv()"] = new_set()
@@ -88,7 +116,7 @@ T["argv()"] = new_set()
 T["argv()"]["maps config onto tasksd flags"] = function()
   config.setup({
     daemon = {
-      path = "/bin/tasksd",
+      path = "/bin/sh",
       thread_number = 7,
       task_buffer_size = 123,
       graceful_period = 11,
@@ -96,7 +124,7 @@ T["argv()"]["maps config onto tasksd flags"] = function()
   })
   local argv = daemon.argv("/tmp/x.sock")
 
-  eq(argv[1], "/bin/tasksd")
+  eq(argv[1], "/bin/sh")
   eq(flag_value(argv, "--unix-socket-path"), "/tmp/x.sock")
   eq(flag_value(argv, "--thread-number"), "7")
   eq(flag_value(argv, "--process-buffer-size"), "123")
