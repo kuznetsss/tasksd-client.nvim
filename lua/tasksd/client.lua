@@ -1,4 +1,6 @@
 local daemon = require("tasksd.daemon")
+local install = require("tasksd.install")
+local pin = require("tasksd.install.pin")
 
 ---The JSON-RPC connection to tasksd: the `Client` object, the handshake, and
 ---the one-connection-per-Neovim cache. Getting a daemon to talk to at all is
@@ -12,14 +14,8 @@ local CLIENT_VERSION = "0.1.0"
 -- a missing daemon, and a live one answers `hello` immediately.
 local HELLO_TIMEOUT_MS = 5000
 
----A constant rather than a config option, so that `client.lua` never has to
----read config. Bump it when this client starts relying on a newer daemon
----feature, so the failure lands once at connect time instead of later as an
----unexplained error from whichever request needed it.
-M.MIN_SERVER_VERSION = "0.2.0"
-
----Semver orders a pre-release *below* its release, so "0.3.0-rc1" does not
----satisfy a 0.3.0 minimum.
+---Rejecting here as well as before launch is not redundant: this is the only
+---check that covers a daemon somebody else started on the socket.
 ---@param server_version any Whatever the daemon put in the `hello` result.
 ---@return string|nil err nil when the version is acceptable.
 M.check_server_version = function(server_version)
@@ -30,13 +26,13 @@ M.check_server_version = function(server_version)
   if not parsed then
     return ("tasksd reported an unrecognisable version %q; %s or newer is required"):format(
       server_version,
-      M.MIN_SERVER_VERSION
+      pin.MIN_VERSION
     )
   end
-  if vim.version.lt(parsed, M.MIN_SERVER_VERSION) then
+  if not install.satisfies_min(server_version) then
     return ("tasksd %s is too old; this client requires %s or newer"):format(
       server_version,
-      M.MIN_SERVER_VERSION
+      pin.MIN_VERSION
     )
   end
   return nil
@@ -50,7 +46,7 @@ end
 ---caller in a disconnected state.
 ---@class tasksd.Client
 ---@field socket_path string Socket this client is connected to.
----@field server_version string Reported during the handshake; never older than `M.MIN_SERVER_VERSION`.
+---@field server_version string Reported during the handshake; never older than `pin.MIN_VERSION`.
 ---@field close_reason string|nil Why the connection ended; nil while it is open.
 ---@field package rpc vim.lsp.rpc.PublicClient
 ---@field package handlers table<string, fun(params: table)>

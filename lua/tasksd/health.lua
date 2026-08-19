@@ -2,6 +2,7 @@ local client = require("tasksd.client")
 local config = require("tasksd.config")
 local daemon = require("tasksd.daemon")
 local install = require("tasksd.install")
+local pin = require("tasksd.install.pin")
 local socket = require("tasksd.socket")
 
 ---What `:checkhealth tasksd` reports: is there a binary, is it new enough, and
@@ -14,29 +15,17 @@ local M = {}
 
 local REPO_URL = "https://github.com/kuznetsss/tasksd"
 
----Prebuilt archives are published for Linux only, so offering the releases page
----anywhere else sends the user to a page with nothing they can run.
+---`:Tasksd install` already picks between a prebuilt release and a source
+---build per platform, so pointing at either by hand would only duplicate --
+---and eventually contradict -- what `tasksd.install.auto` decides.
 ---@return string[]
 local function install_advice()
-  local advice = {
-    ("Build from source: cargo install --git %s --tag %s"):format(
-      REPO_URL,
-      client.MIN_SERVER_VERSION
-    ),
+  return {
+    ("Run `:Tasksd install` to fetch or build tasksd %s"):format(pin.VERSION),
+    'Or supply your own and set daemon.path in require("tasksd").setup()',
+    ("Source: %s"):format(REPO_URL),
   }
-  if vim.uv.os_uname().sysname == "Linux" then
-    table.insert(advice, 1, ("Download a prebuilt binary: %s/releases"):format(REPO_URL))
-  end
-  table.insert(advice, 'Then put it on $PATH, or set daemon.path in require("tasksd").setup()')
-  return advice
 end
-
----@type table<tasksd.ExeSource, string>
-local SOURCE_LABEL = {
-  config = "daemon.path",
-  installed = "installed by this plugin",
-  env = "found on $PATH",
-}
 
 local function check_executable()
   local exe, source = daemon.executable()
@@ -59,7 +48,7 @@ local function check_executable()
     return nil
   end
 
-  vim.health.ok(("tasksd executable: %s (%s)"):format(resolved, SOURCE_LABEL[source]))
+  vim.health.ok(("tasksd executable: %s (%s)"):format(resolved, daemon.SOURCE_LABEL[source]))
   return resolved
 end
 
@@ -81,9 +70,7 @@ local function check_version(exe)
     return
   end
 
-  vim.health.ok(
-    ("tasksd %s (client requires %s or newer)"):format(version, client.MIN_SERVER_VERSION)
-  )
+  vim.health.ok(("tasksd %s (client requires %s or newer)"):format(version, pin.MIN_VERSION))
 end
 
 local function check_socket()

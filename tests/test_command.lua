@@ -4,6 +4,7 @@ local eq = MiniTest.expect.equality
 
 local command = require("tasksd.command")
 local config = require("tasksd.config")
+local daemon = require("tasksd.daemon")
 local install = require("tasksd.install")
 
 local T = new_set()
@@ -11,19 +12,65 @@ local T = new_set()
 ---Run `fn` with `install.run` replaced by a stub, so no case here builds or
 ---downloads anything. The stub records its arguments and hands back the
 ---callback, letting a case decide when -- or whether -- the install finishes.
+---Run `fn` with `install.run` replaced by a stub *and* nothing usable already
+---present, so the subcommand always gets as far as installing. Whatever tasksd
+---the machine running the suite happens to have must not decide these cases.
 ---@param fn fun(calls: { name: string, done: fun(ok: boolean, err: string|nil), report: fun(msg: string) }[])
 local function with_stubbed_run(fn)
-  local original = install.run
+  local original, original_usable = install.run, daemon.usable_version
   local calls = {}
 
   ---@diagnostic disable-next-line: duplicate-set-field
   install.run = function(name, done, report)
     table.insert(calls, { name = name, done = done, report = report })
   end
+  ---@diagnostic disable-next-line: duplicate-set-field
+  daemon.usable_version = function()
+    return nil, "nothing installed"
+  end
 
   local ok, err = pcall(fn, calls)
 
+  install.run, daemon.usable_version = original, original_usable
+  if not ok then
+    error(err, 0)
+  end
+end
+
+---Run `fn` with `install.run` replaced by `impl`, restoring it even when `fn`
+---raises: an escaping error would otherwise leave the stub in place for every
+---later case in the run, including the ones in other files.
+local function with_run(impl, fn)
+  local original = install.run
+  ---@diagnostic disable-next-line: duplicate-set-field
+  install.run = impl
+
+  local ok, err = pcall(fn)
+
   install.run = original
+  if not ok then
+    error(err, 0)
+  end
+end
+
+---Run `fn` with a satisfying tasksd already in place, however it got there.
+---@param version string
+---@param source tasksd.ExeSource
+local function with_usable(version, source, fn)
+  local original_exe, original_usable = daemon.executable, daemon.usable_version
+
+  ---@diagnostic disable-next-line: duplicate-set-field
+  daemon.executable = function()
+    return "/somewhere/tasksd", source
+  end
+  ---@diagnostic disable-next-line: duplicate-set-field
+  daemon.usable_version = function()
+    return version, nil
+  end
+
+  local ok, err = pcall(fn)
+
+  daemon.executable, daemon.usable_version = original_exe, original_usable
   if not ok then
     error(err, 0)
   end
@@ -144,6 +191,56 @@ end
 
 T["install"]["defaults to auto"] = function()
   eq(config.default.install.method, "auto")
+end
+
+-- The point of the whole check: a binary the user supplied through daemon.path
+-- is as good a reason not to install as one this plugin put there.
+T["install"]["skips when a satisfying tasksd is already there"] = function()
+  local ran = false
+
+  with_run(function()
+    ran = true
+  end, function()
+    with_usable("0.2.0", "config", function()
+      with_notify(function(messages)
+        vim.cmd("Tasksd install")
+
+        eq(ran, false)
+        eq(messages[#messages]:find("already available", 1, true) ~= nil, true)
+        eq(messages[#messages]:find("daemon.path", 1, true) ~= nil, true)
+      end)
+    end)
+  end)
+end
+
+T["install"]["says how to install anyway"] = function()
+  with_run(function() end, function()
+    with_usable("0.2.0", "installed", function()
+      with_notify(function(messages)
+        vim.cmd("Tasksd install")
+        eq(messages[#messages]:find("`:Tasksd! install`", 1, true) ~= nil, true)
+      end)
+    end)
+  end)
+end
+
+-- Vim attaches a bang to the command name, never to an argument, so the force
+-- spelling is `:Tasksd! install` and not `:Tasksd install!`.
+T["install"]["installs anyway when banged"] = function()
+  local calls = {}
+
+  with_run(function(name, done)
+    table.insert(calls, { name = name, done = done })
+  end, function()
+    with_usable("0.2.0", "installed", function()
+      with_notify(function()
+        vim.cmd("Tasksd! install cargo")
+        eq(#calls, 1)
+        eq(calls[1].name, "cargo")
+        calls[1].done(true, nil)
+      end)
+    end)
+  end)
 end
 
 T["install"]["announces the method before it starts"] = function()

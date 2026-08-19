@@ -7,7 +7,7 @@ local M = {}
 
 ---A single `:Tasksd` subcommand.
 ---@class tasksd.Subcommand
----@field impl fun(args: string[]) Runs the subcommand. `args` excludes the subcommand name.
+---@field impl fun(args: string[], bang: boolean) Runs the subcommand. `args` excludes the subcommand name.
 ---@field desc string One-line description, shown when the user gets it wrong.
 ---@field complete? fun(arg_lead: string): string[] Optional completion for this subcommand's own arguments.
 
@@ -50,7 +50,7 @@ M.run = function(opts)
     return
   end
 
-  subcommand.impl(vim.list_slice(fargs, 2))
+  subcommand.impl(vim.list_slice(fargs, 2), opts.bang)
 end
 
 ---Completion for `:Tasksd`.

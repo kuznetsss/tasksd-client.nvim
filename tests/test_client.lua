@@ -5,6 +5,7 @@ local eq = MiniTest.expect.equality
 local client = require("tasksd.client")
 local config = require("tasksd.config")
 local install = require("tasksd.install")
+local pin = require("tasksd.install.pin")
 
 -- There is no automated tasksd installation yet, so the integration tests run
 -- against a local build. Override with TASKSD_BIN=/path/to/tasksd.
@@ -130,12 +131,17 @@ T["connect()"]["refuses a daemon older than the minimum"] = function()
   needs_tasksd()
   local socket = new_socket()
 
+  -- Started while the bar is still normal: `daemon.ensure` pre-flights the
+  -- binary's version, so a raised bar would refuse before a handshake ever
+  -- happened. A daemon already listening is the case only this check covers.
+  connect_ok(socket):disconnect()
+
   -- Nothing can install an old tasksd here, so raise the bar instead. pcall so
   -- a failing connect still restores the constant for every later case.
-  local real_minimum = client.MIN_SERVER_VERSION
-  client.MIN_SERVER_VERSION = "999.0.0"
+  local real_minimum = pin.MIN_VERSION
+  pin.MIN_VERSION = "999.0.0"
   local ok, c, err = pcall(connect_sync, socket)
-  client.MIN_SERVER_VERSION = real_minimum
+  pin.MIN_VERSION = real_minimum
   eq(ok, true)
 
   eq(c, nil)
@@ -196,15 +202,15 @@ end
 -- Pinned to a fixed value so these cases stay meaningful when the real minimum
 -- is bumped. `require` caches modules, so this is the *same* table every other
 -- case in the run sees -- hence the restore in post_once.
-local REAL_MINIMUM = client.MIN_SERVER_VERSION
+local REAL_MINIMUM = pin.MIN_VERSION
 
 T["check_server_version()"] = new_set({
   hooks = {
     pre_case = function()
-      client.MIN_SERVER_VERSION = "1.2.3"
+      pin.MIN_VERSION = "1.2.3"
     end,
     post_once = function()
-      client.MIN_SERVER_VERSION = REAL_MINIMUM
+      pin.MIN_VERSION = REAL_MINIMUM
     end,
   },
 })

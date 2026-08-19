@@ -1,5 +1,6 @@
 local config = require("tasksd.config")
 local install = require("tasksd.install")
+local pin = require("tasksd.install.pin")
 
 ---Process control for the tasksd daemon: building its argv, launching it, and
 ---answering "is one listening on this socket?". Nothing here knows about
@@ -29,6 +30,23 @@ end
 
 ---@alias tasksd.ExeSource "config"|"installed"|"env"
 
+---@type table<tasksd.ExeSource, string>
+M.SOURCE_LABEL = {
+  config = "daemon.path",
+  installed = "installed by this plugin",
+  env = "found on $PATH",
+}
+
+---What to tell someone whose binary is unusable, which differs by how they
+---supplied it: a `daemon.path` they chose is theirs to repoint, anything else
+---is this plugin's to replace.
+---@type table<tasksd.ExeSource, string>
+local SOURCE_ADVICE = {
+  config = "point daemon.path at a newer build, or unset it and run `:Tasksd install`",
+  installed = "run `:Tasksd install` to replace it",
+  env = "run `:Tasksd install` to get one this client can use",
+}
+
 ---A `daemon.path` that resolves to something runnable, else one this plugin
 ---installed, else the bare name for `vim.system` to resolve on $PATH.
 ---
@@ -51,6 +69,35 @@ M.executable = function()
     return install.bin_path(), "installed"
   end
   return "tasksd", "env"
+end
+
+---Whether the binary `M.executable` picked is one this client can talk to.
+---
+---Pre-flight, because the handshake catching it is too late in two ways: a
+---too-old daemon still starts and then sits holding the socket, and its
+---rejection never mentions which of the three sources produced it.
+---@param exe string
+---@param source tasksd.ExeSource
+---@return string|nil version nil when the binary cannot be used.
+---@return string|nil err
+M.usable_version = function(exe, source)
+  local label = M.SOURCE_LABEL[source]
+
+  local version, err = install.version_of(exe)
+  if not version then
+    return nil, ("could not read the version of %s (%s): %s"):format(exe, label, tostring(err))
+  end
+  if not install.satisfies_min(version) then
+    return nil,
+      ("%s (%s) is tasksd %s; this client requires %s or newer -- %s"):format(
+        label,
+        exe,
+        version,
+        pin.MIN_VERSION,
+        SOURCE_ADVICE[source]
+      )
+  end
+  return version, nil
 end
 
 ---@param socket_path string
@@ -189,6 +236,13 @@ M.ensure = function(socket_path, on_done)
         vim.schedule(function()
           on_done(ok, err)
         end)
+      end
+
+      -- After the probe, so an already-running daemon never pays for an exec.
+      local _, version_err = M.usable_version(M.executable())
+      if version_err then
+        finish(false, ("could not launch tasksd: %s"):format(version_err))
+        return
       end
 
       local spawned, spawn_err = spawn(socket_path, function(out)

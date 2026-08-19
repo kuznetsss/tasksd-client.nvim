@@ -54,6 +54,16 @@ M.version_of = function(exe)
   return version, nil
 end
 
+---Semver orders a pre-release *below* its release, so "0.3.0-rc1" does not
+---satisfy a 0.3.0 minimum. The one place the floor is compared, so a daemon
+---rejected before launch and one rejected at the handshake can never disagree.
+---@param version string
+---@return boolean
+M.satisfies_min = function(version)
+  local parsed = vim.version.parse(version)
+  return parsed ~= nil and not vim.version.lt(parsed, pin.MIN_VERSION)
+end
+
 ---@alias tasksd.InstallMethodName "auto"|"cargo"|"github"
 
 ---@class tasksd.InstallMethod

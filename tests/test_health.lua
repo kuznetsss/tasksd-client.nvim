@@ -152,7 +152,7 @@ T["check()"]["reports a missing executable and how to get one"] = function()
 
   local err = find(entries, "error", "executable not found")
   MiniTest.expect.no_equality(err, nil)
-  eq(advises(err, "cargo install"), true)
+  eq(advises(err, ":Tasksd install"), true)
 
   -- Nothing to run means nothing to ask for a version: the check must stop
   -- rather than report a second, confusing failure about the same cause.
@@ -206,7 +206,7 @@ T["check()"]["rejects a daemon older than the client requires"] = function()
   local err = find(run_check(), "error", "too old")
 
   MiniTest.expect.no_equality(err, nil)
-  eq(advises(err, "cargo install"), true)
+  eq(advises(err, ":Tasksd install"), true)
 end
 
 -- Errors, not warnings: a binary that will not say what it is cannot be held to

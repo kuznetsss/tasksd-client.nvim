@@ -5,6 +5,9 @@ local eq = MiniTest.expect.equality
 local config = require("tasksd.config")
 local daemon = require("tasksd.daemon")
 local install = require("tasksd.install")
+local pin = require("tasksd.install.pin")
+
+local temps = {}
 
 -- There is no automated tasksd installation yet, so the integration tests run
 -- against a local build. Override with TASKSD_BIN=/path/to/tasksd.
@@ -27,6 +30,11 @@ local T = new_set({
   hooks = {
     pre_case = function()
       config.setup({ daemon = { path = TASKSD } })
+    end,
+    post_once = function()
+      for _, path in ipairs(temps) do
+        vim.fn.delete(path)
+      end
     end,
   },
 })
@@ -150,6 +158,84 @@ T["argv()"]["rejects a non-numeric option instead of passing nil"] = function()
   MiniTest.expect.error(function()
     daemon.argv("/tmp/x.sock")
   end, "thread_number must be a number")
+end
+
+--------------------------------------------------------------------------------
+-- usable_version: the pre-launch version gate
+--------------------------------------------------------------------------------
+
+T["usable_version()"] = new_set()
+
+---tostring() rather than indexing directly, so a nil error message fails the
+---assertion instead of raising a nil-index inside the test.
+local function contains(text, needle)
+  return tostring(text):find(needle, 1, true) ~= nil
+end
+
+---An executable stand-in for tasksd that prints `output` for --version.
+---@return string path
+local function fake_tasksd(output)
+  local path = vim.fn.tempname()
+  vim.fn.writefile({ "#!/bin/sh", ("printf '%%s\\n' %s"):format(vim.fn.shellescape(output)) }, path)
+  vim.fn.setfperm(path, "rwx------")
+  table.insert(temps, path)
+  return path
+end
+
+T["usable_version()"]["accepts a binary at the minimum"] = function()
+  local version, err = daemon.usable_version(fake_tasksd("tasksd " .. pin.MIN_VERSION), "config")
+
+  eq(version, pin.MIN_VERSION)
+  eq(err, nil)
+end
+
+-- Naming the source is the point: "too old" alone leaves the user guessing
+-- which of the three candidates the client even picked.
+T["usable_version()"]["names daemon.path when that is what is stale"] = function()
+  local version, err = daemon.usable_version(fake_tasksd("tasksd 0.0.1"), "config")
+
+  eq(version, nil)
+  eq(contains(err, "daemon.path"), true)
+  eq(contains(err, "0.0.1"), true)
+  eq(contains(err, pin.MIN_VERSION), true)
+end
+
+T["usable_version()"]["points at :Tasksd install for a stale installed binary"] = function()
+  local _, err = daemon.usable_version(fake_tasksd("tasksd 0.0.1"), "installed")
+
+  eq(contains(err, ":Tasksd install"), true)
+end
+
+T["usable_version()"]["rejects a binary that will not say what it is"] = function()
+  local version, err = daemon.usable_version("/nonexistent/tasksd", "env")
+
+  eq(version, nil)
+  eq(contains(err, "could not read the version"), true)
+end
+
+-- Refusing rather than quietly launching something else: the user pointed at
+-- this binary, so substituting another one behind their back is worse than
+-- failing with a reason.
+T["usable_version()"]["stops ensure() before anything is spawned"] = function()
+  config.setup({ daemon = { path = fake_tasksd("tasksd 0.0.1") } })
+  local socket_path = ("/tmp/tasksd-nvim-test-stale-%d.sock"):format(vim.uv.os_getpid())
+  vim.fn.delete(socket_path)
+
+  local done, ok, err = false, nil, nil
+  daemon.ensure(socket_path, function(o, e)
+    done, ok, err = true, o, e
+  end)
+
+  eq(
+    vim.wait(10000, function()
+      return done
+    end, 20),
+    true
+  )
+  eq(ok, false)
+  eq(contains(err, "could not launch tasksd"), true)
+  eq(contains(err, "0.0.1"), true)
+  eq(vim.uv.fs_stat(socket_path), nil)
 end
 
 --------------------------------------------------------------------------------

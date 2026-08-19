@@ -4,9 +4,15 @@ local M = {}
 
 M.REPO_URL = "https://github.com/kuznetsss/tasksd"
 
----Bump together with `client.MIN_SERVER_VERSION`; the test suite asserts this
----is never older.
+---Bump together with `M.MIN_VERSION`; the test suite asserts this is never
+---older.
 M.VERSION = "0.2.0"
+
+---The oldest daemon this client can talk to, whoever supplied it. Here rather
+---than in `tasksd.client` because `tasksd.daemon` needs it too, and client.lua
+---already requires daemon.lua -- reaching back would close a require cycle.
+---Bump it when this client starts relying on a newer daemon feature.
+M.MIN_VERSION = "0.2.0"
 
 ---The commit `VERSION` was tagged at. Given `--tag` and `--rev` together cargo
 ---silently ignores the rev, so `cargo.argv` passes only `--rev` and
