@@ -1,7 +1,7 @@
 - [x] binary download install method
 - [x] add cargo to nix
 - [x] connect path and install method
-- [ ] verify that client starts tasksd when it is not running
+- [x] verify that client starts tasksd when it is not running
 - [ ] commands:
     - [ ] start task
     - [ ] send signal
@@ -11,3 +11,5 @@
 - [ ] picker integration
 - [ ] CI
 - [ ] Remove references to the local build
+- [ ] Check available lua api
+- [ ] Readme file

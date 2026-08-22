@@ -16,6 +16,16 @@ M.default = {
     socket = "global",
     detached = true,
   },
+  form = {
+    -- Keys inside the floating input form; see `tasksd.form`. An empty string
+    -- leaves that action unmapped.
+    keys = {
+      next_field = "<Tab>",
+      prev_field = "<S-Tab>",
+      submit = "<CR>",
+      cancel = "<Esc>",
+    },
+  },
   install = {
     -- Which method `:Tasksd install` uses when given no argument; see
     -- `tasksd.install`.

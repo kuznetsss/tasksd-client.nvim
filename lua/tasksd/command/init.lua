@@ -15,12 +15,7 @@ local M = {}
 M.subcommands = {
   install = require("tasksd.command.install"),
   shutdown = require("tasksd.command.shutdown"),
-  start_task = {
-    desc = "Start a task on the daemon",
-    impl = function(_args)
-      log.info("`start_task` is not implemented yet")
-    end,
-  },
+  start_task = require("tasksd.command.start_task"),
 }
 
 ---Subcommand names, sorted so completion order is stable.
