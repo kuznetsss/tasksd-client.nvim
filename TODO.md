@@ -8,8 +8,10 @@
     - [ ] send input
     - [ ] list of tasks
 - [ ] output buffer
+- [ ] output buffer slots
 - [ ] picker integration
 - [ ] CI
+- [ ] Repeatable task with slots
 - [ ] Remove references to the local build
 - [ ] Check available lua api
 - [ ] Readme file

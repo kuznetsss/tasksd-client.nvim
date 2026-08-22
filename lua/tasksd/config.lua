@@ -17,6 +17,9 @@ M.default = {
     detached = true,
   },
   form = {
+    -- Register a blink.cmp source for the form's completion when blink is
+    -- installed; see `tasksd.blink`. `<C-x><C-u>` works either way.
+    blink = true,
     -- Keys inside the floating input form; see `tasksd.form`. An empty string
     -- leaves that action unmapped.
     keys = {
