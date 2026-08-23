@@ -2,7 +2,6 @@ local client = require("tasksd.client")
 local config = require("tasksd.config")
 local form = require("tasksd.form")
 local log = require("tasksd.log")
-local socket = require("tasksd.socket")
 local task = require("tasksd.task")
 
 ---`:Tasksd start_task` -- collect a command in a floating form, then start it.
@@ -50,20 +49,6 @@ M.params = function(values)
   }
 end
 
----@param err lsp.ResponseError|nil
----@return string
-local function describe(err)
-  if type(err) ~= "table" or type(err.message) ~= "string" then
-    return vim.inspect(err)
-  end
-  -- tasksd puts the failing path, spawn error, and so on in `data`; the
-  -- `message` alone is only the error class.
-  if err.data == nil then
-    return err.message
-  end
-  return ("%s: %s"):format(err.message, tostring(err.data))
-end
-
 ---@param values table<string, string>
 M.start = function(values)
   local params, err = M.params(values)
@@ -72,17 +57,9 @@ M.start = function(values)
     return
   end
 
-  -- socket.path raises on a bad `daemon.socket` setting; a misconfigured
-  -- option should reach the user as a message, not a stack trace.
-  local ok, socket_path = pcall(socket.path)
-  if not ok then
-    log.error(tostring(socket_path))
-    return
-  end
-
-  client.get(socket_path, function(c, connect_err)
+  client.get(function(c, connect_err)
     if not c then
-      log.error(("could not connect to tasksd: %s"):format(connect_err or "unknown error"))
+      log.error(connect_err or "could not connect to tasksd")
       return
     end
 
@@ -92,7 +69,9 @@ M.start = function(values)
 
     local sent = c:request("task.start", params, function(rpc_err, result)
       if rpc_err then
-        log.error(("could not start `%s`: %s"):format(params.executable, describe(rpc_err)))
+        log.error(
+          ("could not start `%s`: %s"):format(params.executable, client.describe_error(rpc_err))
+        )
         return
       end
       local task_id = result and result.task_id

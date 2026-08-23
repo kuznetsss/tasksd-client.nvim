@@ -507,4 +507,73 @@ T["get()"]["always calls back asynchronously, including on a cache hit"] = funct
   eq(order, { "returned", "callback" })
 end
 
+--------------------------------------------------------------------------------
+-- get(): the default socket
+--------------------------------------------------------------------------------
+
+T["default socket"] = new_set({
+  hooks = {
+    post_case = function()
+      client.reset()
+    end,
+  },
+})
+
+T["default socket"]["connects to the socket `daemon.socket` names"] = function()
+  needs_tasksd()
+  local socket = new_socket()
+  config.setup({
+    daemon = {
+      path = TASKSD,
+      socket = function()
+        return socket
+      end,
+    },
+  })
+
+  eq(get_ok().socket_path, socket)
+end
+
+-- socket.path raises; the callback is the only channel a caller has.
+T["default socket"]["reports an unresolvable setting through the callback"] = function()
+  config.setup({ daemon = { socket = "nonsense" } })
+
+  local c, err = get_sync()
+
+  eq(c, nil)
+  eq(tostring(err):match("daemon.socket must be one of") ~= nil, true)
+end
+
+-- The resolution happens before the cache is read, so a setting broken
+-- mid-session cannot cost a live connection its subscriptions.
+T["default socket"]["leaves the live client alone when it cannot resolve"] = function()
+  needs_tasksd()
+  local live = get_ok(new_socket())
+
+  config.setup({ daemon = { socket = "nonsense" } })
+  local c, err = get_sync()
+
+  eq(c, nil)
+  MiniTest.expect.no_equality(err, nil)
+  eq(live:is_connected(), true)
+end
+
+T["default socket"]["takes the callback as its only argument"] = function()
+  config.setup({ daemon = { socket = "nonsense" } })
+
+  local order, err = {}, nil
+  client.get(function(_, e)
+    table.insert(order, "callback")
+    err = e
+  end)
+  table.insert(order, "returned")
+  vim.wait(1000, function()
+    return #order == 2
+  end, 10)
+
+  -- Asynchronous even here, where the failure is known before any I/O.
+  eq(order, { "returned", "callback" })
+  MiniTest.expect.no_equality(err, nil)
+end
+
 return T

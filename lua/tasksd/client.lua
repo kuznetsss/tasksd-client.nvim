@@ -1,6 +1,7 @@
 local daemon = require("tasksd.daemon")
 local install = require("tasksd.install")
 local pin = require("tasksd.install.pin")
+local socket = require("tasksd.socket")
 
 ---The JSON-RPC connection to tasksd: the `Client` object, the handshake, and
 ---the one-connection-per-Neovim cache. Getting a daemon to talk to at all is
@@ -36,6 +37,20 @@ M.check_server_version = function(server_version)
     )
   end
   return nil
+end
+
+---@param err lsp.ResponseError|nil
+---@return string
+M.describe_error = function(err)
+  if type(err) ~= "table" or type(err.message) ~= "string" then
+    return vim.inspect(err)
+  end
+  -- tasksd puts the failing path, spawn error, and so on in `data`; the
+  -- `message` alone is only the error class.
+  if err.data == nil then
+    return err.message
+  end
+  return ("%s: %s"):format(err.message, tostring(err.data))
 end
 
 --------------------------------------------------------------------------------
@@ -239,11 +254,32 @@ local waiting_socket = nil
 ---
 ---Concurrent calls share a single connection attempt rather than racing to
 ---launch competing daemons.
----@param socket_path string
----@param on_done fun(client: tasksd.Client|nil, err: string|nil) Always asynchronous, cache hit or not.
+---@param socket_path string|fun(client: tasksd.Client|nil, err: string|nil)|nil Which daemon, or the callback alone to use `socket.path()`.
+---@param on_done? fun(client: tasksd.Client|nil, err: string|nil) Always asynchronous, cache hit or not.
 M.get = function(socket_path, on_done)
-  vim.validate("socket_path", socket_path, "string")
+  if type(socket_path) == "function" then
+    on_done = socket_path
+    socket_path = nil
+  end
+  vim.validate("socket_path", socket_path, "string", true)
   vim.validate("on_done", on_done, "callable")
+  ---@cast socket_path string|nil
+  ---@cast on_done -nil
+
+  if not socket_path then
+    -- Resolved before `current` is read, so a `daemon.socket` that cannot be
+    -- resolved does not cost a live connection its subscriptions. `socket.path`
+    -- raises rather than returning an error, and a user-supplied provider
+    -- function can raise anything at all.
+    local ok, resolved = pcall(socket.path)
+    if not ok then
+      vim.schedule(function()
+        on_done(nil, tostring(resolved))
+      end)
+      return
+    end
+    socket_path = resolved
+  end
 
   -- Comparing socket_path covers the provider changing its mind mid-session (a
   -- per-project provider after :cd, say).

@@ -3,8 +3,8 @@
 - [x] connect path and install method
 - [x] verify that client starts tasksd when it is not running
 - [ ] commands:
-    - [ ] start task
-    - [ ] send signal
+    - [x] start task
+    - [x] send signal
     - [ ] send input
     - [ ] list of tasks
 - [ ] output buffer

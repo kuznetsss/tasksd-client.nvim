@@ -14,6 +14,7 @@ local M = {}
 ---@type table<string, tasksd.Subcommand>
 M.subcommands = {
   install = require("tasksd.command.install"),
+  send_signal = require("tasksd.command.send_signal"),
   shutdown = require("tasksd.command.shutdown"),
   start_task = require("tasksd.command.start_task"),
 }
