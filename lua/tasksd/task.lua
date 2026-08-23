@@ -70,8 +70,9 @@ end
 ---@field state tasksd.TaskState
 ---@field info tasksd.TaskInfo
 
+---The states a `task.list` result is split by, in the order they are shown.
 ---@type tasksd.TaskState[]
-local STATES = { "running", "finished" }
+M.STATES = { "running", "finished" }
 
 ---Flatten a `task.list` result into a single list: running tasks first, and
 ---within each state the highest id first.
@@ -88,7 +89,7 @@ M.entries = function(result)
   end
 
   local entries = {}
-  for _, state in ipairs(STATES) do
+  for _, state in ipairs(M.STATES) do
     local group = {}
     for _, entry in ipairs(tasks[state] or {}) do
       table.insert(group, { id = entry.id, state = state, info = entry.info })

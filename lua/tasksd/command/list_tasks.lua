@@ -1,79 +1,76 @@
-local client = require("tasksd.client")
 local log = require("tasksd.log")
-local picker = require("tasksd.picker")
-local task = require("tasksd.task")
+local task_picker = require("tasksd.task_picker")
 
----`:Tasksd list_tasks` -- show the daemon's tasks in a picker.
+---`:Tasksd list_tasks [all|running|finished]` -- show the daemon's tasks in a
+---picker.
 ---
 ---The listing is daemon-wide, so it includes tasks this Neovim never started.
+---The filter is applied here rather than by the daemon: `task.list` takes no
+---params, and the whole listing is bounded anyway.
 ---@class tasksd.command.ListTasks : tasksd.Subcommand
 local M = {}
 
-M.desc = "List the daemon's tasks"
+M.desc = "List the daemon's tasks: [all|running|finished]"
 
-M.TITLE = "tasksd tasks"
+M.DEFAULT_FILTER = "all"
 
----@type table<tasksd.TaskState, string>
-local STATE_HL = { running = "DiagnosticOk", finished = "Comment" }
-
----@param entries tasksd.TaskEntry[]
----@return tasksd.picker.Row[]
-M.rows = function(entries)
-  local rows = {}
-  for _, entry in ipairs(entries) do
-    table.insert(rows, {
-      value = entry,
-      columns = {
-        { text = tostring(entry.id), hl = "Number", align = "right" },
-        { text = entry.state, hl = STATE_HL[entry.state] },
-        { text = task.command_line(entry.info) },
-        { text = vim.fn.fnamemodify(entry.info.working_dir, ":~"), hl = "Directory" },
-      },
-    })
+---@param filter tasksd.TaskFilter
+---@return string
+M.title = function(filter)
+  if filter == "all" then
+    return "tasksd tasks"
   end
-  return rows
+  return ("tasksd tasks (%s)"):format(filter)
 end
 
----An empty daemon is said rather than shown: a picker with nothing in it makes
----the user work out which of "no tasks" and "no answer" they are looking at.
----@param entries tasksd.TaskEntry[]
-M.show = function(entries)
-  if vim.tbl_isempty(entries) then
-    log.info("the daemon has no tasks")
+---@param filter tasksd.TaskFilter
+---@return string
+M.empty_message = function(filter)
+  if filter == "all" then
+    return "the daemon has no tasks"
+  end
+  return ("the daemon has no %s tasks"):format(filter)
+end
+
+---@param args string[]
+---@return tasksd.TaskFilter|nil filter, string|nil err
+M.parse = function(args)
+  if #args > 1 then
+    return nil, ("expected at most one filter, got %d arguments"):format(#args)
+  end
+
+  local filter = args[1] or M.DEFAULT_FILTER
+  if not vim.tbl_contains(task_picker.filters(), filter) then
+    return nil,
+      ("unknown filter `%s`, expected one of: %s"):format(
+        filter,
+        table.concat(task_picker.filters(), ", ")
+      )
+  end
+  ---@cast filter tasksd.TaskFilter
+  return filter, nil
+end
+
+M.impl = function(args)
+  local filter, err = M.parse(args)
+  if not filter then
+    log.error(tostring(err))
     return
   end
 
-  local ok, err = picker.pick({
-    title = M.TITLE,
-    items = picker.align(M.rows(entries)),
+  task_picker.open({
+    title = M.title(filter),
+    filter = filter,
+    empty = M.empty_message(filter),
   })
-  if not ok then
-    log.error(tostring(err))
-  end
 end
 
-M.list = function()
-  client.get(function(c, connect_err)
-    if not c then
-      log.error(connect_err or "could not connect to tasksd")
-      return
-    end
-
-    local sent = c:request("task.list", nil, function(rpc_err, result)
-      if rpc_err then
-        log.error(("could not list tasks: %s"):format(client.describe_error(rpc_err)))
-        return
-      end
-      M.show(task.entries(result))
-    end)
-    if not sent then
-      log.error("could not send task.list: the connection closed")
-    end
-  end)
-end
-
-M.impl = function(_args)
-  M.list()
+---@param arg_lead string
+---@return string[]
+M.complete = function(arg_lead)
+  return vim.tbl_filter(function(name)
+    return vim.startswith(name, arg_lead)
+  end, task_picker.filters())
 end
 
 return M

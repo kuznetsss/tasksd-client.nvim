@@ -1,15 +1,18 @@
 local client = require("tasksd.client")
 local log = require("tasksd.log")
+local picker = require("tasksd.picker")
+local task = require("tasksd.task")
+local task_picker = require("tasksd.task_picker")
 
----`:Tasksd send_signal task_id=<id> [signal=<name|number>]` -- signal a task.
+---`:Tasksd send_signal [task_id=<id>] [signal=<name|number>]` -- signal a task.
 ---
----The id is typed out until there is a picker to choose one from; the arguments
----are `key=value` so that ordering never matters and so a picker can later fill
----in `task_id=` while the user still writes `signal=`.
+---With neither argument this asks two questions in pickers: which task, then
+---which signal. The arguments are `key=value` so that ordering never matters
+---and so either question can be answered in advance without answering both.
 ---@class tasksd.command.SendSignal : tasksd.Subcommand
 local M = {}
 
-M.desc = "Send a signal to a task: task_id=<id> [signal=<name or number>]"
+M.desc = "Send a signal to a task: [task_id=<id>] [signal=<name or number>]"
 
 M.DEFAULT_SIGNAL = "TERM"
 
@@ -96,7 +99,12 @@ M.params = function(args)
   if not values then
     return nil, parse_err
   end
+  return M.params_from(values)
+end
 
+---@param values table<string, string> As `M.parse` returns them.
+---@return tasksd.TaskSignalParams|nil params, string|nil err
+M.params_from = function(values)
   if not values.task_id then
     return nil, "task_id= is required"
   end
@@ -135,13 +143,102 @@ M.send = function(params)
   end)
 end
 
-M.impl = function(args)
-  local params, err = M.params(args)
-  if not params then
+---The default first: it is the common signal, and the first row is what `<CR>`
+---sends without any typing. The rest stay alphabetical.
+---@return tasksd.picker.Row[]
+M.signal_rows = function()
+  local numbers = signals()
+
+  local names = { M.DEFAULT_SIGNAL }
+  for _, name in ipairs(M.signal_names()) do
+    if name ~= M.DEFAULT_SIGNAL then
+      table.insert(names, name)
+    end
+  end
+
+  local rows = {}
+  for _, name in ipairs(names) do
+    table.insert(rows, {
+      value = name,
+      columns = {
+        { text = name, hl = "Identifier" },
+        { text = tostring(numbers["SIG" .. name]), hl = "Number", align = "right" },
+      },
+    })
+  end
+  return rows
+end
+
+---@param entry tasksd.TaskEntry
+---@return string
+M.signal_title = function(entry)
+  return ("Choose a signal to send to task %d: %s"):format(entry.id, task.command_line(entry.info))
+end
+
+---@param entry tasksd.TaskEntry
+M.choose_signal = function(entry)
+  local ok, err = picker.pick({
+    title = M.signal_title(entry),
+    items = picker.align(M.signal_rows()),
+    ---@param name string
+    on_choice = function(name)
+      local signal, signal_err = M.signal_number(name)
+      if not signal then
+        log.error(tostring(signal_err))
+        return
+      end
+      M.send({ task_id = entry.id, signal = signal })
+    end,
+  })
+  if not ok then
     log.error(tostring(err))
+  end
+end
+
+M.TASK_TITLE = "Choose a task to send a signal to"
+
+---Only running tasks are offered: the daemon rejects a signal to a finished one
+---with `5`, unless it left children behind in its process group.
+---@param on_choice fun(entry: tasksd.TaskEntry)
+M.choose_task = function(on_choice)
+  task_picker.open({
+    title = M.TASK_TITLE,
+    filter = "running",
+    empty = "the daemon has no running tasks",
+    on_choice = on_choice,
+  })
+end
+
+M.impl = function(args)
+  local values, parse_err = M.parse(args)
+  if not values then
+    log.error(tostring(parse_err))
     return
   end
-  M.send(params)
+
+  if values.task_id then
+    local params, err = M.params_from(values)
+    if not params then
+      log.error(tostring(err))
+      return
+    end
+    M.send(params)
+    return
+  end
+
+  M.choose_task(function(entry)
+    -- A `signal=` on the command line answers the second question in advance.
+    if not values.signal then
+      M.choose_signal(entry)
+      return
+    end
+    local signal, signal_err = M.signal_number(values.signal)
+    if not signal then
+      log.error(tostring(signal_err))
+      return
+    end
+    M.send({ task_id = entry.id, signal = signal })
+  end)
 end
 
 ---@param arg_lead string
@@ -159,8 +256,9 @@ M.complete = function(arg_lead)
       end, M.signal_names())
     )
   end
-  -- Nothing to offer for `task_id=` until there is a picker; ids come from the
-  -- daemon, not from anything this side knows.
+  -- Nothing to offer for `task_id=`: completion has to answer synchronously and
+  -- the ids are on the far side of a request. Omitting the argument entirely is
+  -- what opens the task picker.
   if key then
     return {}
   end

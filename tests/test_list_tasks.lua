@@ -87,107 +87,89 @@ local T = new_set({
 })
 
 --------------------------------------------------------------------------------
--- rows
+-- parse
 --------------------------------------------------------------------------------
 
-T["rows()"] = new_set()
+T["parse()"] = new_set()
 
----@param id integer
----@param state tasksd.TaskState
----@return tasksd.TaskEntry
-local function entry(id, state)
-  return {
-    id = id,
-    state = state,
-    info = { executable = "sleep", args = { "60" }, working_dir = "/tmp" },
-  }
+T["parse()"]["defaults to all"] = function()
+  eq(list_tasks.parse({}), "all")
 end
 
-T["rows()"]["puts the id, state, command and directory in columns"] = function()
-  local rows = list_tasks.rows({ entry(3, "running") })
-  eq(#rows, 1)
-  eq(rows[1].columns, {
-    { text = "3", hl = "Number", align = "right" },
-    { text = "running", hl = "DiagnosticOk" },
-    { text = "sleep 60" },
-    { text = "/tmp", hl = "Directory" },
-  })
+T["parse()"]["takes a state as the filter"] = function()
+  eq(list_tasks.parse({ "running" }), "running")
+  eq(list_tasks.parse({ "finished" }), "finished")
 end
 
-T["rows()"]["carries the entry as the row's value"] = function()
-  local task_entry = entry(3, "running")
-  eq(list_tasks.rows({ task_entry })[1].value, task_entry)
+T["parse()"]["rejects a filter that is not a state"] = function()
+  local filter, err = list_tasks.parse({ "sleeping" })
+  eq(filter, nil)
+  eq(tostring(err):match("^unknown filter `sleeping`") ~= nil, true)
+  eq(tostring(err):match("all, finished, running$") ~= nil, true)
 end
 
-T["rows()"]["shortens a working directory under $HOME"] = function()
-  local rows = list_tasks.rows({
-    {
-      id = 1,
-      state = "finished",
-      info = { executable = "ls", args = {}, working_dir = vim.fn.expand("~/somewhere") },
-    },
-  })
-  eq(rows[1].columns[4].text, "~/somewhere")
+T["parse()"]["rejects more than one filter"] = function()
+  local filter, err = list_tasks.parse({ "running", "finished" })
+  eq(filter, nil)
+  eq(err, "expected at most one filter, got 2 arguments")
 end
 
 --------------------------------------------------------------------------------
--- show
+-- messages
 --------------------------------------------------------------------------------
 
-T["show()"] = new_set()
+T["title()"] = new_set()
 
-T["show()"]["opens the picker with one aligned item per task"] = function()
-  local opened
-  config.setup({
-    picker = function(spec)
-      opened = spec
-    end,
-  })
-
-  list_tasks.show({ entry(3, "running"), entry(12, "finished") })
-
-  eq(opened.title, list_tasks.TITLE)
-  eq(opened.items[1].text, " 3  running   sleep 60  /tmp")
-  eq(opened.items[2].text, "12  finished  sleep 60  /tmp")
-  eq(opened.items[1].value.id, 3)
+T["title()"]["names the filter unless it is all"] = function()
+  eq(list_tasks.title("all"), "tasksd tasks")
+  eq(list_tasks.title("running"), "tasksd tasks (running)")
 end
 
--- An empty picker leaves the user to work out which of "no tasks" and "no
--- answer" they are looking at.
-T["show()"]["says so instead of opening an empty picker"] = function()
-  local opened = false
-  config.setup({
-    picker = function()
-      opened = true
-    end,
-  })
+T["empty_message()"] = new_set()
 
+T["empty_message()"]["names the filter unless it is all"] = function()
+  eq(list_tasks.empty_message("all"), "the daemon has no tasks")
+  eq(list_tasks.empty_message("finished"), "the daemon has no finished tasks")
+end
+
+--------------------------------------------------------------------------------
+-- completion
+--------------------------------------------------------------------------------
+
+T["complete()"] = new_set()
+
+T["complete()"]["offers the filters"] = function()
+  eq(list_tasks.complete(""), { "all", "finished", "running" })
+end
+
+T["complete()"]["filters them by prefix"] = function()
+  eq(list_tasks.complete("f"), { "finished" })
+end
+
+T["complete()"]["is reachable from the command line"] = function()
+  eq(vim.fn.getcompletion("Tasksd list_tasks ", "cmdline"), { "all", "finished", "running" })
+end
+
+--------------------------------------------------------------------------------
+-- impl
+--------------------------------------------------------------------------------
+
+T["impl()"] = new_set()
+
+T["impl()"]["reports a bad filter without connecting"] = function()
   local messages = with_capture(function()
-    list_tasks.show({})
-  end)
-
-  eq(opened, false)
-  eq(messages, { { msg = "the daemon has no tasks", level = vim.log.levels.INFO } })
-end
-
-T["show()"]["reports an unusable picker setting"] = function()
-  config.setup({ picker = "nonsense" })
-
-  local messages = with_capture(function()
-    list_tasks.show({ entry(1, "running") })
+    list_tasks.impl({ "sleeping" })
   end)
 
   eq(messages[1].level, vim.log.levels.ERROR)
-  eq(messages[1].msg:match("^unknown picker `nonsense`") ~= nil, true)
+  eq(messages[1].msg:match("^unknown filter `sleeping`") ~= nil, true)
 end
 
 --------------------------------------------------------------------------------
--- list: integration against a real daemon
+-- against a real daemon
 --------------------------------------------------------------------------------
 
-T["list()"] = new_set()
-
-T["list()"]["shows a task the daemon is running"] = function()
+T["impl()"]["shows a task the daemon is running"] = function()
   needs_tasksd()
   local opened = use_own_daemon()
 
@@ -199,12 +181,13 @@ T["list()"]["shows a task the daemon is running"] = function()
     local task_id = messages[1].msg:match("as task (%d+)$")
     eq(task_id ~= nil, true)
 
-    list_tasks.list()
+    list_tasks.impl({ "running" })
     vim.wait(15000, function()
       return opened() ~= nil
     end, 20)
 
     local spec = assert(opened())
+    eq(spec.title, "tasksd tasks (running)")
     local item = spec.items[1]
     eq(item.value.id, assert(tonumber(task_id)))
     eq(item.value.state, "running")
@@ -214,11 +197,29 @@ T["list()"]["shows a task the daemon is running"] = function()
   client.reset()
 end
 
-T["list()"]["reports an unusable socket setting without connecting"] = function()
+T["impl()"]["says so when nothing matches the filter"] = function()
+  needs_tasksd()
+  local opened = use_own_daemon()
+
+  local messages = with_capture(function(msgs)
+    list_tasks.impl({ "finished" })
+    vim.wait(15000, function()
+      return #msgs >= 1
+    end, 20)
+  end)
+
+  eq(opened(), nil)
+  eq(messages[1].msg, "the daemon has no finished tasks")
+  eq(messages[1].level, vim.log.levels.INFO)
+
+  client.reset()
+end
+
+T["impl()"]["reports an unusable socket setting without connecting"] = function()
   config.setup({ daemon = { socket = "nonsense" } })
 
   local messages = with_capture(function(msgs)
-    list_tasks.list()
+    list_tasks.impl({})
     vim.wait(1000, function()
       return #msgs >= 1
     end, 20)
