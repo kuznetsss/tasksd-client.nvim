@@ -15,6 +15,7 @@ local M = {}
 M.subcommands = {
   install = require("tasksd.command.install"),
   list_tasks = require("tasksd.command.list_tasks"),
+  send_input = require("tasksd.command.send_input"),
   send_signal = require("tasksd.command.send_signal"),
   shutdown = require("tasksd.command.shutdown"),
   start_task = require("tasksd.command.start_task"),

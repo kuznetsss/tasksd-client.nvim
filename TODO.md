@@ -2,10 +2,10 @@
 - [x] add cargo to nix
 - [x] connect path and install method
 - [x] verify that client starts tasksd when it is not running
-- [ ] commands:
+- [x] commands:
     - [x] start task
     - [x] send signal
-    - [ ] send input
+    - [x] send input
     - [x] list of tasks
 - [ ] output buffer
 - [ ] output buffer slots
