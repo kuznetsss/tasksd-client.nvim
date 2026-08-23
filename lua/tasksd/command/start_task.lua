@@ -114,6 +114,7 @@ M.open = function()
     keys = config.current.form.keys,
     blink = config.current.form.blink,
     fields = {
+      { name = "command", label = "Command: ", complete = M.complete_command },
       {
         name = "working_dir",
         label = "Working directory: ",
@@ -122,7 +123,6 @@ M.open = function()
         value = vim.fn.fnamemodify(vim.fn.getcwd(), ":~"),
         complete = M.complete_dir,
       },
-      { name = "command", label = "Command: ", complete = M.complete_command },
     },
     on_submit = M.start,
   })
