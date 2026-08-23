@@ -187,6 +187,9 @@ function Form:fit()
 end
 
 function Form:close()
+  -- Closing a window does not leave insert mode, so the mode `M.open` started
+  -- would outlive the form and land in whatever buffer gets the focus back.
+  vim.cmd.stopinsert()
   if vim.api.nvim_win_is_valid(self.win) then
     vim.api.nvim_win_close(self.win, true)
   end

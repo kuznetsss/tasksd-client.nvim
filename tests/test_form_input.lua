@@ -77,4 +77,20 @@ T["repairs a field line deleted with dd"] = function()
   eq(child.lua_get("#vim.api.nvim_buf_get_extmarks(_G.form.buf, -1, 0, -1, {})"), 2)
 end
 
+T["opens in insert mode"] = function()
+  eq(child.lua_get("vim.api.nvim_get_mode().mode"), "i")
+end
+
+T["leaves insert mode when submitted from it"] = function()
+  child.type_keys("<CR>")
+
+  eq(child.lua_get("vim.api.nvim_get_mode().mode"), "n")
+end
+
+T["leaves insert mode when closed from it"] = function()
+  child.lua("_G.form:close()")
+
+  eq(child.lua_get("vim.api.nvim_get_mode().mode"), "n")
+end
+
 return T
