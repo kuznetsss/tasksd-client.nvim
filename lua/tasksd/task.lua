@@ -55,4 +55,58 @@ M.watch = function(client, report)
   end)
 end
 
+---How the daemon resolved a task when it started it, which is not the same as
+---the `task.start` params it was given.
+---@class tasksd.TaskInfo
+---@field executable string
+---@field args string[]
+---@field working_dir string
+
+---@alias tasksd.TaskState "running"|"finished"
+
+---One entry of a `task.list` result, with the array it came out of folded in.
+---@class tasksd.TaskEntry
+---@field id integer
+---@field state tasksd.TaskState
+---@field info tasksd.TaskInfo
+
+---@type tasksd.TaskState[]
+local STATES = { "running", "finished" }
+
+---Flatten a `task.list` result into a single list: running tasks first, and
+---within each state the highest id first.
+---
+---The daemon leaves the order of `running` unspecified and hands back
+---`finished` oldest first, so neither array can be shown as it arrives. Ids
+---come from a counter, so descending id is "most recently started first".
+---@param result any The `task.list` result, straight off the wire.
+---@return tasksd.TaskEntry[]
+M.entries = function(result)
+  local tasks = type(result) == "table" and result.tasks
+  if type(tasks) ~= "table" then
+    return {}
+  end
+
+  local entries = {}
+  for _, state in ipairs(STATES) do
+    local group = {}
+    for _, entry in ipairs(tasks[state] or {}) do
+      table.insert(group, { id = entry.id, state = state, info = entry.info })
+    end
+    table.sort(group, function(a, b)
+      return a.id > b.id
+    end)
+    vim.list_extend(entries, group)
+  end
+  return entries
+end
+
+---The command as `task.start` was asked for it. No shell was involved, so this
+---is a display of the argv rather than something that could be run again.
+---@param info tasksd.TaskInfo
+---@return string
+M.command_line = function(info)
+  return table.concat(vim.list_extend({ info.executable }, info.args or {}), " ")
+end
+
 return M

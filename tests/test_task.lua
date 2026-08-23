@@ -69,4 +69,58 @@ T["watch()"]["reports a task as it exits"] = function()
   eq(reported, { { msg = "task 3 finished", level = vim.log.levels.INFO } })
 end
 
+T["entries()"] = new_set()
+
+---@param id integer
+---@return table
+local function listed(id)
+  return { id = id, info = { executable = "sleep", args = { "60" }, working_dir = "/tmp" } }
+end
+
+---@param entries tasksd.TaskEntry[]
+---@return string[]
+local function ids_and_states(entries)
+  return vim.tbl_map(function(entry)
+    return ("%d:%s"):format(entry.id, entry.state)
+  end, entries)
+end
+
+T["entries()"]["puts running tasks before finished ones"] = function()
+  local entries = task.entries({
+    tasks = { running = { listed(2) }, finished = { listed(7) } },
+  })
+  eq(ids_and_states(entries), { "2:running", "7:finished" })
+end
+
+T["entries()"]["orders each state by descending id"] = function()
+  local entries = task.entries({
+    tasks = { running = { listed(1), listed(5), listed(3) }, finished = { listed(2), listed(4) } },
+  })
+  eq(ids_and_states(entries), { "5:running", "3:running", "1:running", "4:finished", "2:finished" })
+end
+
+T["entries()"]["keeps the info the daemon reported"] = function()
+  local entries = task.entries({ tasks = { running = { listed(1) }, finished = {} } })
+  eq(entries[1].info, { executable = "sleep", args = { "60" }, working_dir = "/tmp" })
+end
+
+T["entries()"]["is empty for a daemon with no tasks"] = function()
+  eq(task.entries({ tasks = { running = {}, finished = {} } }), {})
+end
+
+T["entries()"]["is empty for a result it cannot read"] = function()
+  eq(task.entries(nil), {})
+  eq(task.entries({}), {})
+end
+
+T["command_line()"] = new_set()
+
+T["command_line()"]["joins the executable and its arguments"] = function()
+  eq(task.command_line({ executable = "sleep", args = { "60" }, working_dir = "/tmp" }), "sleep 60")
+end
+
+T["command_line()"]["is the executable alone when there are no arguments"] = function()
+  eq(task.command_line({ executable = "ls", args = {}, working_dir = "/tmp" }), "ls")
+end
+
 return T

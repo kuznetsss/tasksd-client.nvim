@@ -6,12 +6,13 @@
     - [x] start task
     - [x] send signal
     - [ ] send input
-    - [ ] list of tasks
+    - [x] list of tasks
 - [ ] output buffer
 - [ ] output buffer slots
-- [ ] picker integration
+- [x] picker integration
 - [ ] CI
 - [ ] Repeatable task with slots
+- [ ] Highlights
 - [ ] Remove references to the local build
 - [ ] Check available lua api
 - [ ] Readme file

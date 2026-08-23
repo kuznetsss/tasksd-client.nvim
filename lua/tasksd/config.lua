@@ -29,6 +29,12 @@ M.default = {
       cancel = "<Esc>",
     },
   },
+  -- Which picker shows a list; see `tasksd.picker`.
+  --   'auto'   -- snacks.nvim when it is there, else 'select'
+  --   'snacks' -- snacks.nvim's picker
+  --   'select' -- vim.ui.select
+  --   function(spec) -- open one of your own
+  picker = "auto",
   install = {
     -- Which method `:Tasksd install` uses when given no argument; see
     -- `tasksd.install`.
