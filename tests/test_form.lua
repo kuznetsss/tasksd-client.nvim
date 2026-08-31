@@ -7,6 +7,7 @@ local form = require("tasksd.form")
 local KEYS = {
   next_field = "<Tab>",
   prev_field = "<S-Tab>",
+  toggle = "<Space>",
   submit = "<CR>",
   cancel = "<Esc>",
 }
@@ -22,6 +23,20 @@ local function open(on_submit)
       { name = "second", label = "Second: " },
     },
     on_submit = on_submit or function() end,
+  })
+end
+
+---@param checked boolean|nil
+---@return tasksd.Form
+local function open_toggle(checked)
+  return form.open({
+    title = "Test",
+    keys = KEYS,
+    fields = {
+      { name = "text", label = "Text: ", value = "one" },
+      { name = "flag", label = "Flag: ", type = "toggle", value = checked },
+    },
+    on_submit = function() end,
   })
 end
 
@@ -311,6 +326,72 @@ T["form"]["leaves an empty key unmapped"] = function()
   for _, keymap in ipairs(vim.api.nvim_buf_get_keymap(f.buf, "i")) do
     eq(keymap.lhs, "<CR>")
   end
+end
+
+T["toggle"] = new_set({
+  hooks = {
+    post_case = function()
+      vim.cmd.stopinsert()
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(win).relative ~= "" then
+          vim.api.nvim_win_close(win, true)
+        end
+      end
+    end,
+  },
+})
+
+T["toggle"]["draws an empty box by default"] = function()
+  eq(vim.api.nvim_buf_get_lines(open_toggle().buf, 0, -1, false), { "one", "[ ]" })
+end
+
+T["toggle"]["draws a ticked box for a field that starts on"] = function()
+  eq(vim.api.nvim_buf_get_lines(open_toggle(true).buf, 0, -1, false), { "one", "[x]" })
+end
+
+T["toggle"]["submits a boolean, not the box"] = function()
+  eq(open_toggle(false):values(), { text = "one", flag = false })
+  eq(open_toggle(true):values(), { text = "one", flag = true })
+end
+
+T["toggle"]["flips the field and redraws the box"] = function()
+  local f = open_toggle(false)
+
+  eq(f:toggle(2), true)
+  eq(vim.api.nvim_buf_get_lines(f.buf, 1, 2, false), { "[x]" })
+  eq(f:values().flag, true)
+
+  eq(f:toggle(2), true)
+  eq(f:values().flag, false)
+end
+
+-- What the mapping checks before deciding to pass the key on.
+T["toggle"]["reports a field it cannot flip"] = function()
+  local f = open_toggle(false)
+  eq(f:toggle(1), false)
+  eq(f:toggle(9), false)
+  eq(f:values().text, "one")
+end
+
+-- The line is not free text: an edit changes what it says without changing what
+-- it means, so the state is the truth and the line is redrawn from it.
+T["toggle"]["repairs a box that was typed over"] = function()
+  local f = open_toggle(true)
+  vim.api.nvim_buf_set_lines(f.buf, 1, 2, false, { "nonsense" })
+
+  f:refresh()
+
+  eq(vim.api.nvim_buf_get_lines(f.buf, 1, 2, false), { "[x]" })
+  eq(f:values().flag, true)
+end
+
+T["toggle"]["repairs a box that was deleted outright"] = function()
+  local f = open_toggle(false)
+  vim.api.nvim_buf_set_lines(f.buf, 1, 2, false, {})
+
+  f:refresh()
+
+  eq(vim.api.nvim_buf_get_lines(f.buf, 0, -1, false), { "one", "[ ]" })
 end
 
 return T

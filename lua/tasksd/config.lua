@@ -25,9 +25,22 @@ M.default = {
     keys = {
       next_field = "<Tab>",
       prev_field = "<S-Tab>",
+      toggle = "<Space>",
       submit = "<CR>",
       cancel = "<Esc>",
     },
+  },
+  output = {
+    -- Where the output window opens; see `tasksd.output.window`.
+    --   'left' | 'right' | 'top' | 'bottom' | 'float'
+    position = "bottom",
+    -- A count of lines/columns or a percentage of the editor. A split uses
+    -- only the dimension its position implies; a float uses both, and can be
+    -- given them separately as `{ width = ..., height = ... }`.
+    size = "30%",
+    max_lines = 5000, -- lines
+    -- Whether the start-task form's "Show output" box starts ticked.
+    show_on_start = false,
   },
   -- Which picker shows a list; see `tasksd.picker`.
   --   'auto'   -- snacks.nvim when it is there, else 'select'

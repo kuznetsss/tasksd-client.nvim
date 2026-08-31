@@ -2,6 +2,7 @@ local client = require("tasksd.client")
 local config = require("tasksd.config")
 local form = require("tasksd.form")
 local log = require("tasksd.log")
+local output = require("tasksd.output")
 local task = require("tasksd.task")
 
 ---`:Tasksd start_task` -- collect a command in a floating form, then start it.
@@ -27,29 +28,33 @@ end
 ---@field subscribe_to_output boolean
 
 ---Turn what the form collected into `task.start` params.
----@param values table<string, string>
+---@param values table<string, string|boolean>
 ---@return tasksd.TaskStartParams|nil params, string|nil err
 M.params = function(values)
-  local executable, args = M.split(values.command or "")
+  local command = values.command
+  local executable, args = M.split(type(command) == "string" and command or "")
   if not executable then
     return nil, "no command given"
   end
 
   -- The daemon resolves a relative `working_dir` against its own cwd, which is
   -- wherever it happened to be launched from and outlives any `:cd` here.
-  local dir = vim.trim(values.working_dir or "")
+  local given = values.working_dir
+  local dir = vim.trim(type(given) == "string" and given or "")
   dir = dir == "" and vim.fn.getcwd() or vim.fn.fnamemodify(vim.fs.normalize(dir), ":p")
 
   return {
     executable = executable,
     args = args,
     working_dir = dir,
-    -- Nothing consumes `task.output` yet; `task.exit` arrives either way.
-    subscribe_to_output = false,
+    -- Subscribing here rather than with `task.subscribe` once the window is
+    -- open is what puts the task's first lines in the buffer: a subscription
+    -- made later starts from wherever the output has got to.
+    subscribe_to_output = values.show_output == true,
   }
 end
 
----@param values table<string, string>
+---@param values table<string, string|boolean>
 M.start = function(values)
   local params, err = M.params(values)
   if not params then
@@ -80,6 +85,13 @@ M.start = function(values)
         return
       end
       log.info(("started `%s` as task %d"):format(params.executable, task_id))
+
+      if params.subscribe_to_output then
+        -- `attach` rather than `show`: this connection is the one carrying the
+        -- output. Unfocused, because asking to watch a task is not asking to
+        -- stop what you were doing.
+        output.attach(c, task_id, { enter = false })
+      end
     end)
     if not sent then
       log.error("could not send task.start: the connection closed")
@@ -122,6 +134,12 @@ M.open = function()
         -- `getcompletion` completes it as it stands.
         value = vim.fn.fnamemodify(vim.fn.getcwd(), ":~"),
         complete = M.complete_dir,
+      },
+      {
+        name = "show_output",
+        label = "Show output: ",
+        type = "toggle",
+        value = config.current.output.show_on_start,
       },
     },
     on_submit = M.start,

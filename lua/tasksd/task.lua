@@ -45,11 +45,22 @@ M.exit_message = function(params)
   return ("%s exited"):format(label), vim.log.levels.WARN
 end
 
----Report every task this client started as it exits. Replaces any previous
----report function on this client.
+---Clients already reporting. Weak keys, so a client that has been disconnected
+---and dropped everywhere else is not kept alive by this table alone.
+---@type table<tasksd.Client, true>
+local watched = setmetatable({}, { __mode = "k" })
+
+---Report every task this client started as it exits. Registers once per client:
+---`Client:on` keeps every listener it is given, so a call per started task
+---would report each exit as many times as tasks have been started.
 ---@param client tasksd.Client
 ---@param report fun(msg: string, level: integer)
 M.watch = function(client, report)
+  if watched[client] then
+    return
+  end
+  watched[client] = true
+
   client:on("task.exit", function(params)
     report(M.exit_message(params))
   end)

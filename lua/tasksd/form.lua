@@ -12,6 +12,11 @@ M.FILETYPE = "tasksd-form"
 -- Wide enough that an ordinary path or command line does not wrap on sight.
 local MIN_WIDTH = 80
 
+-- The whole line of a toggle field, which is why an edit to one is repaired
+-- rather than read: the text shows the state, it does not hold it.
+local TICKED = "[x]"
+local UNTICKED = "[ ]"
+
 ---Live forms, so `M.complete` can find the one it was invoked for. Entries are
 ---dropped when the buffer is wiped.
 ---@type table<integer, tasksd.Form>
@@ -20,13 +25,15 @@ local by_buf = {}
 ---@class tasksd.form.Field
 ---@field name string Key this field's value appears under in the submitted table.
 ---@field label string Drawn before the value; never part of the buffer text.
----@field value? string Initial value.
+---@field type? "text"|"toggle" Defaults to "text".
+---@field value? string|boolean Initial value: the text, or whether a toggle starts ticked.
 ---@field complete? fun(before: string): integer, string[] `:h complete-functions` for one field: the text before the cursor in, the byte offset the match starts at and the candidates out.
 
 ---Each entry is a `{lhs}`; nil leaves that action unmapped.
 ---@class tasksd.form.Keys
 ---@field next_field? string
 ---@field prev_field? string
+---@field toggle? string
 ---@field submit? string
 ---@field cancel? string
 
@@ -34,7 +41,7 @@ local by_buf = {}
 ---@field title string
 ---@field fields tasksd.form.Field[]
 ---@field keys tasksd.form.Keys
----@field on_submit fun(values: table<string, string>)
+---@field on_submit fun(values: table<string, string|boolean>)
 ---@field blink? boolean Offer this form's completion through blink.cmp when it is installed.
 
 ---@param fields tasksd.form.Field[]
@@ -70,19 +77,52 @@ end
 ---@field buf integer
 ---@field win integer
 ---@field package fields tasksd.form.Field[]
----@field package on_submit fun(values: table<string, string>)
+---@field package checked table<integer, boolean> Toggle fields' state, by field index.
+---@field package on_submit fun(values: table<string, string|boolean>)
 ---@field package width integer Width it wants, before the editor's own width caps it.
 local Form = {}
 Form.__index = Form
 
----@return table<string, string>
+---@return table<string, string|boolean>
 function Form:values()
   local lines = vim.api.nvim_buf_get_lines(self.buf, 0, #self.fields, false)
   local values = {}
   for i, field in ipairs(self.fields) do
-    values[field.name] = vim.trim(lines[i] or "")
+    if field.type == "toggle" then
+      values[field.name] = self.checked[i] == true
+    else
+      values[field.name] = vim.trim(lines[i] or "")
+    end
   end
   return values
+end
+
+---Flip the toggle field at `index`.
+---@param index integer
+---@return boolean toggled false when that field is not a toggle.
+function Form:toggle(index)
+  local field = self.fields[index]
+  if not field or field.type ~= "toggle" then
+    return false
+  end
+  self.checked[index] = not self.checked[index]
+  self:draw_toggles()
+  return true
+end
+
+---Put every toggle line back to the state it stands for. Only writes a line
+---that is wrong, so this can run after every change without filling the undo
+---history with no-ops.
+function Form:draw_toggles()
+  local lines = vim.api.nvim_buf_get_lines(self.buf, 0, #self.fields, false)
+  for i, field in ipairs(self.fields) do
+    if field.type == "toggle" then
+      local want = self.checked[i] and TICKED or UNTICKED
+      if lines[i] ~= want then
+        vim.api.nvim_buf_set_lines(self.buf, i - 1, i, false, { want })
+      end
+    end
+  end
 end
 
 ---1-based index of the field the cursor is on.
@@ -106,6 +146,7 @@ end
 ---unconditionally covers that.
 function Form:refresh()
   self:normalize()
+  self:draw_toggles()
   draw_labels(self.buf, self.fields)
   self:resize()
 end
@@ -247,7 +288,11 @@ local function render(fields)
   local labels = label_width(fields)
   local lines, width = {}, 0
   for i, field in ipairs(fields) do
-    lines[i] = field.value or ""
+    if field.type == "toggle" then
+      lines[i] = field.value and TICKED or UNTICKED
+    else
+      lines[i] = type(field.value) == "string" and field.value or ""
+    end
     width = math.max(width, labels + vim.fn.strdisplaywidth(lines[i]))
   end
   return lines, width
@@ -271,6 +316,17 @@ local function map(form, keys)
   set({ "n", "i" }, keys.prev_field, function()
     form:focus(form:current() - 1)
   end)
+  -- Insert mode as well: the form opens in it, so a normal-mode-only tick would
+  -- mean leaving insert to answer a yes-or-no question.
+  local tick = keys.toggle or ""
+  set({ "n", "i" }, tick, function()
+    if form:toggle(form:current()) then
+      return
+    end
+    -- Not a toggle line, so the key keeps its ordinary meaning. "n" so this
+    -- does not come straight back through the same mapping.
+    vim.api.nvim_feedkeys(vim.keycode(tick), "n", false)
+  end)
   set({ "n", "i" }, keys.submit, function()
     form:submit()
   end)
@@ -288,6 +344,13 @@ M.open = function(opts)
   vim.validate("keys", opts.keys, "table")
   vim.validate("on_submit", opts.on_submit, "callable")
   assert(#opts.fields > 0, "a form needs at least one field")
+
+  local checked = {}
+  for i, field in ipairs(opts.fields) do
+    if field.type == "toggle" then
+      checked[i] = field.value == true
+    end
+  end
 
   local lines, content = render(opts.fields)
   local desired = math.max(content + 4, MIN_WIDTH)
@@ -317,6 +380,7 @@ M.open = function(opts)
     buf = buf,
     win = win,
     fields = opts.fields,
+    checked = checked,
     on_submit = opts.on_submit,
     width = desired,
   }, Form)

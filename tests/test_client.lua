@@ -196,6 +196,95 @@ T["connect()"]["returns nil and an error when tasksd is missing"] = function()
 end
 
 --------------------------------------------------------------------------------
+-- on: notification listeners, integration against a real daemon
+--------------------------------------------------------------------------------
+
+T["on()"] = new_set()
+
+---Start a task that exits at once, so a `task.exit` follows immediately.
+---@param c tasksd.Client
+local function start_quick_task(c)
+  eq(
+    c:request("task.start", {
+      executable = "true",
+      args = {},
+      working_dir = "/tmp",
+      subscribe_to_output = false,
+    }, function() end),
+    true
+  )
+end
+
+T["on()"]["delivers a notification to every listener"] = function()
+  needs_tasksd()
+  local c = connect_ok(new_socket())
+
+  local seen = {}
+  c:on("task.exit", function()
+    table.insert(seen, "first")
+  end)
+  c:on("task.exit", function()
+    table.insert(seen, "second")
+  end)
+
+  start_quick_task(c)
+  vim.wait(5000, function()
+    return #seen >= 2
+  end, 20)
+  c:disconnect()
+
+  eq(seen, { "first", "second" })
+end
+
+T["on()"]["stops delivering to a listener that detached"] = function()
+  needs_tasksd()
+  local c = connect_ok(new_socket())
+
+  local kept, detached = 0, 0
+  c:on("task.exit", function()
+    kept = kept + 1
+  end)
+  local detach = c:on("task.exit", function()
+    detached = detached + 1
+  end)
+  detach()
+  detach()
+
+  start_quick_task(c)
+  vim.wait(5000, function()
+    return kept > 0
+  end, 20)
+  c:disconnect()
+
+  eq({ kept, detached }, { 1, 0 })
+end
+
+-- Detaching mid-dispatch shortens the list the loop is walking, which would
+-- otherwise skip whichever listener slid into the freed slot.
+T["on()"]["runs the listeners behind one that detaches itself"] = function()
+  needs_tasksd()
+  local c = connect_ok(new_socket())
+
+  local seen = {}
+  local detach
+  detach = c:on("task.exit", function()
+    table.insert(seen, "first")
+    detach()
+  end)
+  c:on("task.exit", function()
+    table.insert(seen, "second")
+  end)
+
+  start_quick_task(c)
+  vim.wait(5000, function()
+    return #seen >= 2
+  end, 20)
+  c:disconnect()
+
+  eq(seen, { "first", "second" })
+end
+
+--------------------------------------------------------------------------------
 -- check_server_version: the minimum-version policy, no daemon needed
 --------------------------------------------------------------------------------
 

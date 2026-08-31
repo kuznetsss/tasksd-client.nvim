@@ -1,8 +1,9 @@
 local log = require("tasksd.log")
+local output = require("tasksd.output")
 local task_picker = require("tasksd.task_picker")
 
 ---`:Tasksd list_tasks [all|running|finished]` -- show the daemon's tasks in a
----picker.
+---picker, and show the output of whichever is chosen.
 ---
 ---The listing is daemon-wide, so it includes tasks this Neovim never started.
 ---The filter is applied here rather than by the daemon: `task.list` takes no
@@ -62,6 +63,9 @@ M.impl = function(args)
     title = M.title(filter),
     filter = filter,
     empty = M.empty_message(filter),
+    on_choice = function(entry)
+      output.show(entry.id)
+    end,
   })
 end
 

@@ -4,17 +4,26 @@ local eq = MiniTest.expect.equality
 
 local task = require("tasksd.task")
 
----A client that only records what was registered on it.
----@return tasksd.Client, table<string, fun(params: table)>
+---A client that only records what was registered on it, and a way to push a
+---notification through everything registered for it.
+---@return tasksd.Client, fun(method: string, params: table)
 local function fake_client()
-  local handlers = {}
+  local listeners = {}
   local client = {
     on = function(_, method, handler)
-      handlers[method] = handler
+      listeners[method] = listeners[method] or {}
+      table.insert(listeners[method], handler)
+      return function() end
     end,
   }
   ---@cast client tasksd.Client
-  return client, handlers
+
+  return client,
+    function(method, params)
+      for _, handler in ipairs(listeners[method] or {}) do
+        handler(params)
+      end
+    end
 end
 
 local T = new_set()
@@ -58,15 +67,47 @@ end
 T["watch()"] = new_set()
 
 T["watch()"]["reports a task as it exits"] = function()
-  local client, handlers = fake_client()
+  local client, fire = fake_client()
   local reported = {}
 
   task.watch(client, function(msg, level)
     table.insert(reported, { msg = msg, level = level })
   end)
-  handlers["task.exit"]({ task_id = 3, exit_code = 0, signal = vim.NIL })
+  fire("task.exit", { task_id = 3, exit_code = 0, signal = vim.NIL })
 
   eq(reported, { { msg = "task 3 finished", level = vim.log.levels.INFO } })
+end
+
+-- `start_task` calls this per started task, and `Client:on` keeps every
+-- listener it is given.
+T["watch()"]["registers once per client, however often it is called"] = function()
+  local client, fire = fake_client()
+  local reported = 0
+  local function report()
+    reported = reported + 1
+  end
+
+  task.watch(client, report)
+  task.watch(client, report)
+  fire("task.exit", { task_id = 3, exit_code = 0, signal = vim.NIL })
+
+  eq(reported, 1)
+end
+
+T["watch()"]["watches each client for itself"] = function()
+  local first, fire_first = fake_client()
+  local second, fire_second = fake_client()
+  local reported = 0
+  local function report()
+    reported = reported + 1
+  end
+
+  task.watch(first, report)
+  task.watch(second, report)
+  fire_first("task.exit", { task_id = 3, exit_code = 0, signal = vim.NIL })
+  fire_second("task.exit", { task_id = 4, exit_code = 0, signal = vim.NIL })
+
+  eq(reported, 2)
 end
 
 T["entries()"] = new_set()

@@ -135,6 +135,16 @@ T["params()"]["builds the request from the form values"] = function()
   })
 end
 
+-- Subscribing at `task.start` rather than with `task.subscribe` once the window
+-- is open is what puts the task's first lines in the buffer.
+T["params()"]["subscribes to the output when the box is ticked"] = function()
+  local params = assert(start_task.params({ command = "ls", show_output = true }))
+  eq(params.subscribe_to_output, true)
+
+  params = assert(start_task.params({ command = "ls", show_output = false }))
+  eq(params.subscribe_to_output, false)
+end
+
 T["params()"]["refuses an empty command"] = function()
   local params, err = start_task.params({ working_dir = "/tmp", command = "" })
   eq(params, nil)
@@ -177,6 +187,25 @@ T["open()"]["offers the working directory with $HOME collapsed"] = function()
   values.command = "ls"
   local params = assert(start_task.params(values))
   eq(params.working_dir, vim.fn.getcwd() .. "/")
+end
+
+T["open()"]["starts the output box from the config"] = function()
+  config.setup({ output = { show_on_start = true } })
+  local f = start_task.open()
+  local values = f:values()
+  f:close()
+  config.setup({})
+
+  eq(values.show_output, true)
+end
+
+T["open()"]["leaves the output box empty by default"] = function()
+  config.setup({})
+  local f = start_task.open()
+  local values = f:values()
+  f:close()
+
+  eq(values.show_output, false)
 end
 
 T["complete_dir()"] = new_set()

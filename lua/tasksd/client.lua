@@ -64,7 +64,7 @@ end
 ---@field server_version string Reported during the handshake; never older than `pin.MIN_VERSION`.
 ---@field close_reason string|nil Why the connection ended; nil while it is open.
 ---@field package rpc vim.lsp.rpc.PublicClient
----@field package handlers table<string, fun(params: table)>
+---@field package listeners table<string, (fun(params: table))[]>
 ---@field package on_close fun(client: tasksd.Client, reason: string)|nil
 local Client = {}
 Client.__index = Client
@@ -78,7 +78,7 @@ function Client.new(socket_path, on_close)
   return setmetatable({
     socket_path = socket_path,
     server_version = "",
-    handlers = {},
+    listeners = {},
     on_close = on_close,
   }, Client)
 end
@@ -114,12 +114,29 @@ function Client:notify(method, params)
   return self.rpc.notify(method, params)
 end
 
----Register a handler for a notification the daemon pushes, e.g. "task.output".
----Passing nil removes the handler. Handlers run on the main loop.
+---Listen for a notification the daemon pushes, e.g. "task.output". Listeners
+---run on the main loop, in the order they were added, and a method can have any
+---number of them: one connection is shared by everything in this Neovim, so
+---`task.exit` has both the notifier and whatever is showing that task's output
+---waiting on it.
 ---@param method string
----@param handler fun(params: table)|nil
+---@param handler fun(params: table)
+---@return fun() detach Removes this listener. Safe to call more than once.
 function Client:on(method, handler)
-  self.handlers[method] = handler
+  vim.validate("handler", handler, "callable")
+
+  local listeners = self.listeners[method] or {}
+  self.listeners[method] = listeners
+  table.insert(listeners, handler)
+
+  return function()
+    for i, listener in ipairs(listeners) do
+      if listener == handler then
+        table.remove(listeners, i)
+        return
+      end
+    end
+  end
 end
 
 ---Safe to call more than once: `terminate` returns early once it is already
@@ -152,9 +169,10 @@ local function handshake(socket_path, on_close, on_done)
       if method == "shutting_down" then
         self.close_reason = "daemon shut down"
       end
-      local handler = self.handlers[method]
-      if handler then
-        handler(params)
+      -- Over a copy: a listener is free to detach itself, or anything else,
+      -- while it runs.
+      for _, listener in ipairs(vim.list_slice(self.listeners[method] or {})) do
+        listener(params)
       end
     end,
     -- The one place a client is declared dead. vim.lsp.rpc routes every ending

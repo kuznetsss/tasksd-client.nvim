@@ -1,3 +1,4 @@
+local arguments = require("tasksd.args")
 local client = require("tasksd.client")
 local log = require("tasksd.log")
 local picker = require("tasksd.picker")
@@ -72,19 +73,7 @@ end
 ---@param args string[]
 ---@return table<string, string>|nil values, string|nil err
 M.parse = function(args)
-  local values = {}
-  for _, arg in ipairs(args) do
-    local key, value = arg:match("^([%w_]+)=(.*)$")
-    if not key then
-      return nil, ("expected key=value, got `%s`"):format(arg)
-    end
-    if not vim.tbl_contains(KEYS, key .. "=") then
-      return nil,
-        ("unknown argument `%s`, expected one of: %s"):format(key, table.concat(KEYS, ", "))
-    end
-    values[key] = value
-  end
-  return values, nil
+  return arguments.parse(args, KEYS)
 end
 
 ---The `task.send_signal` params; see `docs/API.md` in tasksd.
@@ -244,27 +233,14 @@ end
 ---@param arg_lead string
 ---@return string[]
 M.complete = function(arg_lead)
-  local key, value = arg_lead:match("^([%w_]+)=(.*)$")
-  if key == "signal" then
-    local lead = value:upper()
-    return vim.tbl_map(
-      function(name)
-        return "signal=" .. name
-      end,
-      vim.tbl_filter(function(name)
-        return vim.startswith(name, lead)
-      end, M.signal_names())
-    )
-  end
-  -- Nothing to offer for `task_id=`: completion has to answer synchronously and
-  -- the ids are on the far side of a request. Omitting the argument entirely is
-  -- what opens the task picker.
-  if key then
-    return {}
-  end
-  return vim.tbl_filter(function(name)
-    return vim.startswith(name, arg_lead)
-  end, KEYS)
+  -- Nothing is offered for `task_id=`: completion has to answer synchronously
+  -- and the ids are on the far side of a request. Omitting the argument
+  -- entirely is what opens the task picker.
+  return arguments.complete(arg_lead, KEYS, {
+    signal = function(lead)
+      return arguments.starting_with(lead:upper(), M.signal_names())
+    end,
+  })
 end
 
 return M
