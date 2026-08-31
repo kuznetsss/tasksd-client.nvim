@@ -137,6 +137,23 @@ T["remembers"]["nothing about a window parked off the editor's edges"] = functio
   eq(place(open()).height, 4)
 end
 
+T["remembers"]["a resize made while the window stayed open"] = function()
+  local win = open()
+  vim.api.nvim_win_set_height(win, 4)
+  -- Showing another task reopens onto the same window, which must not put the
+  -- size the user just chose back to the configured one.
+  eq(place(open()).height, 4)
+end
+
+T["remembers"]["a float dragged while the window stayed open"] = function()
+  local float = { position = "float", size = 10 }
+  local win = open({ default = float })
+  vim.api.nvim_win_set_config(win, { relative = "editor", row = 2, col = 3 })
+
+  local config = vim.api.nvim_win_get_config(open({ default = float }))
+  eq({ config.row, config.col }, { 2, 3 })
+end
+
 T["reset"] = new_set()
 
 T["reset"]["puts the window back where the config says"] = function()

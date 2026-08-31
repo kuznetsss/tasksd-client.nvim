@@ -165,16 +165,32 @@ local function placement(opts)
   }
 end
 
+---@param task_id integer
+---@return string
+local function buffer_name(task_id)
+  return ("tasksd://task/%d"):format(task_id)
+end
+
 ---@param c tasksd.Client
 ---@param task_id integer
 ---@param opts tasksd.output.Opts
 ---@param note string|nil Shown instead of output, when there is nothing to subscribe to.
 local function begin(c, task_id, opts, note)
   local previous = session
+  -- Buffer names are unique, and `previous` is still around to be named against
+  -- because it cannot be dropped until the window holds the new buffer. A
+  -- daemon that restarted and reissued a task id would otherwise raise E95.
+  if previous and vim.api.nvim_buf_is_valid(previous.buffer.buf) then
+    vim.api.nvim_buf_set_name(previous.buffer.buf, "")
+  end
+
   local s = {
     client = c,
     task_id = task_id,
-    buffer = buffer.new({ max_lines = config.current.output.max_lines }),
+    buffer = buffer.new({
+      max_lines = config.current.output.max_lines,
+      name = buffer_name(task_id),
+    }),
     detach = {},
     finished = note ~= nil,
   }

@@ -198,6 +198,44 @@ T["show()"]["swaps the buffer when told to show a different task"] = function()
   eq(#vim.api.nvim_list_wins(), 2)
 end
 
+T["show()"]["names the buffer after the task"] = function()
+  local id = start(talker(5))
+  output.show(id)
+  until_("the task's output", function()
+    return has(lines(), "two")
+  end)
+
+  eq(vim.api.nvim_buf_get_name(assert(shown())), ("tasksd://task/%d"):format(id))
+end
+
+T["attach()"] = new_set()
+
+---@return tasksd.Client
+local function connection()
+  local c
+  client.get(function(got)
+    c = got
+  end)
+  until_("a connection", function()
+    return c ~= nil
+  end)
+  return c
+end
+
+-- A daemon that restarted can hand out a task id a live session already holds,
+-- and buffer names are unique, so the outgoing buffer has to give its name up.
+T["attach()"]["takes the buffer name back from the session it replaces"] = function()
+  local c = connection()
+  local id = start(talker(5))
+
+  output.attach(c, id)
+  local first = assert(shown())
+  output.attach(c, id)
+
+  eq(vim.api.nvim_buf_is_valid(first), false)
+  eq(vim.api.nvim_buf_get_name(assert(shown())), ("tasksd://task/%d"):format(id))
+end
+
 -- `subscribe_to_output` at `task.start` is what makes a task's opening lines
 -- reachable at all, and the window has to be listening in time to keep them:
 -- line 1, not just the tail.

@@ -129,6 +129,13 @@ local function geometry_of(win)
   return { position = position, width = vim.api.nvim_win_get_width(win) }
 end
 
+---Take down where `win` is now, keeping the last placement that could be
+---reproduced when this one cannot.
+---@param win integer
+local function remember(win)
+  remembered = geometry_of(win) or remembered
+end
+
 ---@param opts tasksd.output.window.Opts
 ---@return tasksd.output.Geometry
 local function resolve(opts)
@@ -221,7 +228,7 @@ local function watch_close(win, on_close)
     callback = function()
       -- WinClosed runs while the window is still there, which is the last
       -- moment its placement can be read at all.
-      remembered = geometry_of(win) or remembered
+      remember(win)
       current = nil
       if on_close then
         on_close()
@@ -236,9 +243,14 @@ end
 ---@param opts tasksd.output.window.Opts
 ---@return integer win
 M.open = function(buf, opts)
-  local geometry = resolve(opts)
   local win = M.win()
+  -- An open window has been resized and moved since it opened; where it is now
+  -- is the placement to keep, not the one it was last closed at.
+  if win then
+    remember(win)
+  end
 
+  local geometry = resolve(opts)
   if win then
     -- Reconfigured rather than reopened: closing would fire `on_close`, which
     -- to this window's owner means the output is no longer wanted.
