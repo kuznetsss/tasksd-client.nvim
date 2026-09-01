@@ -1,4 +1,5 @@
 local client = require("tasksd.client")
+local highlights = require("tasksd.highlights")
 local log = require("tasksd.log")
 local picker = require("tasksd.picker")
 local task = require("tasksd.task")
@@ -23,7 +24,7 @@ M.filters = function()
 end
 
 ---@type table<tasksd.TaskState, string>
-local STATE_HL = { running = "DiagnosticOk", finished = "Comment" }
+local STATE_HL = { running = "TasksdTaskRunning", finished = "TasksdTaskFinished" }
 
 ---@param entries tasksd.TaskEntry[]
 ---@param filter tasksd.TaskFilter|nil Defaults to "all".
@@ -40,15 +41,16 @@ end
 ---@param entries tasksd.TaskEntry[]
 ---@return tasksd.picker.Row[]
 M.rows = function(entries)
+  highlights.ensure()
   local rows = {}
   for _, entry in ipairs(entries) do
     table.insert(rows, {
       value = entry,
       columns = {
-        { text = tostring(entry.id), hl = "Number", align = "right" },
+        { text = tostring(entry.id), hl = "TasksdTaskId", align = "right" },
         { text = entry.state, hl = STATE_HL[entry.state] },
-        { text = task.command_line(entry.info) },
-        { text = vim.fn.fnamemodify(entry.info.working_dir, ":~"), hl = "Directory" },
+        { text = task.command_line(entry.info), hl = "TasksdTaskCommand" },
+        { text = vim.fn.fnamemodify(entry.info.working_dir, ":~"), hl = "TasksdTaskDir" },
       },
     })
   end

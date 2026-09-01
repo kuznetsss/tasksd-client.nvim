@@ -1,3 +1,5 @@
+local highlights = require("tasksd.highlights")
+
 ---A floating form: one editable buffer line per field, the field's label drawn
 ---beside it as inline virtual text. Knows nothing about tasks -- callers
 ---describe fields and receive a table of values.
@@ -56,19 +58,29 @@ end
 
 ---Drawn from scratch each time: deleting a line takes its extmark with it, so
 ---a repaired buffer has lost some of them.
+---
+---Runs after `Form:draw_toggles`, which is what makes a toggle line exactly one
+---box wide.
 ---@param buf integer
 ---@param fields tasksd.form.Field[]
-local function draw_labels(buf, fields)
+---@param checked table<integer, boolean>
+local function decorate(buf, fields, checked)
   local width = label_width(fields)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   for i, field in ipairs(fields) do
     -- right_gravity=false keeps the label pinned before column 0; the default
     -- would let text typed at the start of the line slide in front of it.
     vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, {
-      virt_text = { { ("%-" .. width .. "s"):format(field.label), "Title" } },
+      virt_text = { { ("%-" .. width .. "s"):format(field.label), "TasksdFormLabel" } },
       virt_text_pos = "inline",
       right_gravity = false,
     })
+    if field.type == "toggle" then
+      vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, {
+        end_col = #TICKED,
+        hl_group = checked[i] and "TasksdFormToggleOn" or "TasksdFormToggleOff",
+      })
+    end
   end
 end
 
@@ -106,7 +118,9 @@ function Form:toggle(index)
     return false
   end
   self.checked[index] = not self.checked[index]
-  self:draw_toggles()
+  -- The box and the colour it is drawn in are redrawn together, so this is a
+  -- refresh rather than a `draw_toggles`.
+  self:refresh()
   return true
 end
 
@@ -147,7 +161,7 @@ end
 function Form:refresh()
   self:normalize()
   self:draw_toggles()
-  draw_labels(self.buf, self.fields)
+  decorate(self.buf, self.fields, self.checked)
   self:resize()
 end
 
@@ -344,6 +358,7 @@ M.open = function(opts)
   vim.validate("keys", opts.keys, "table")
   vim.validate("on_submit", opts.on_submit, "callable")
   assert(#opts.fields > 0, "a form needs at least one field")
+  highlights.ensure()
 
   local checked = {}
   for i, field in ipairs(opts.fields) do
@@ -359,7 +374,7 @@ M.open = function(opts)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  draw_labels(buf, opts.fields)
+  decorate(buf, opts.fields, checked)
 
   -- Opened at one row per field and grown by `Form:resize` below, so wrapping
   -- is measured against the width the window actually got.
@@ -375,6 +390,7 @@ M.open = function(opts)
     title_pos = "center",
   })
   vim.wo[win].cursorline = true
+  vim.wo[win].winhighlight = highlights.WINHIGHLIGHT.float
 
   local form = setmetatable({
     buf = buf,

@@ -31,6 +31,18 @@ local function output(b, from, texts)
   end
 end
 
+---The group each row is drawn in, by 1-based row. Rows carrying no mark -- the
+---task's own output -- are absent.
+---@param b tasksd.output.Buffer
+---@return table<integer, string>
+local function marks(b)
+  local found = {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(b.buf, -1, 0, -1, { details = true })) do
+    found[mark[2] + 1] = mark[4].hl_group
+  end
+  return found
+end
+
 local T = new_set({
   hooks = {
     post_case = function()
@@ -205,6 +217,58 @@ T["finish()"]["leaves room for a gap filled after the task ended"] = function()
   b:finish({ task_id = 7, exit_code = 0, signal = vim.NIL })
   b:fill(gap, { { line = "one\n", line_number = 0 } })
   eq(lines(b), { "one", "two", "[task 7 finished]" })
+end
+
+T["highlights"] = new_set()
+
+T["highlights"]["colours a placeholder and leaves output alone"] = function()
+  local b = new()
+  output(b, 0, { "one" })
+  b:missed({ from_line = 1, missed = 2 })
+  eq(marks(b), { [2] = "TasksdOutputLoading", [3] = "TasksdOutputLoading" })
+end
+
+T["highlights"]["colours a line the daemon could not supply"] = function()
+  local b = new()
+  local gap = { from_line = 0, missed = 2 }
+  b:missed(gap)
+  b:fill(gap, { { line = "one\n", line_number = 0 } })
+  eq(marks(b), { [2] = "TasksdOutputLost" })
+end
+
+T["highlights"]["takes the mark off a placeholder that was filled"] = function()
+  local b = new()
+  local gap = { from_line = 0, missed = 1 }
+  b:missed(gap)
+  b:fill(gap, { { line = "one\n", line_number = 0 } })
+  eq(marks(b), {})
+end
+
+-- A mark left on a trimmed row would collapse onto the row that took its place,
+-- colouring output the task wrote.
+T["highlights"]["drops the marks of rows the ring trimmed away"] = function()
+  local b = new(2)
+  b:missed({ from_line = 0, missed = 2 })
+  output(b, 2, { "three", "four" })
+  eq(lines(b), { "three", "four" })
+  eq(marks(b), {})
+end
+
+T["highlights"]["tells a clean exit from a failed one"] = function()
+  local ok, failed, signalled = new(), new(), new()
+  ok:finish({ task_id = 1, exit_code = 0, signal = vim.NIL })
+  failed:finish({ task_id = 2, exit_code = 1, signal = vim.NIL })
+  signalled:finish({ task_id = 3, exit_code = vim.NIL, signal = 9 })
+
+  eq(marks(ok), { [1] = "TasksdOutputExit" })
+  eq(marks(failed), { [1] = "TasksdOutputExitFailed" })
+  eq(marks(signalled), { [1] = "TasksdOutputExitFailed" })
+end
+
+T["highlights"]["colours a note that is not about an exit"] = function()
+  local b = new()
+  b:note("task 7 has already finished")
+  eq(marks(b), { [1] = "TasksdOutputNote" })
 end
 
 T["close()"] = new_set()

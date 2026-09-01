@@ -437,6 +437,43 @@ mappings are buffer-local to the form.
 form = { keys = { next_field = "<C-n>", prev_field = "<C-p>", cancel = "" } }
 ```
 
+## Highlights
+
+Everything the plugin draws goes through a `Tasksd*` highlight group, each
+linked by default to a group your colorscheme already defines:
+
+| Group | Default | Where |
+| ----- | ------- | ----- |
+| `TasksdNormal` | `Normal` | Output panel, when it is a split |
+| `TasksdNormalFloat` | `NormalFloat` | Output panel and start-task form, when floating |
+| `TasksdBorder` | `FloatBorder` | Border of either float |
+| `TasksdTitle` | `FloatTitle` | Title in that border |
+| `TasksdFormLabel` | `Title` | Field labels in the form |
+| `TasksdFormToggleOn` | `DiagnosticOk` | A ticked `[x]` box |
+| `TasksdFormToggleOff` | `Comment` | An empty `[ ]` box |
+| `TasksdTaskId` | `Number` | Task id in a picker |
+| `TasksdTaskRunning` | `DiagnosticOk` | State of a running task |
+| `TasksdTaskFinished` | `Comment` | State of a finished task |
+| `TasksdTaskCommand` | *(none)* | The command line in a picker |
+| `TasksdTaskDir` | `Directory` | The working directory in a picker |
+| `TasksdOutputNote` | `Comment` | A `[...]` line the plugin wrote into the output |
+| `TasksdOutputExit` | `DiagnosticOk` | `[task 7 finished]` |
+| `TasksdOutputExitFailed` | `DiagnosticError` | A non-zero exit or a signal |
+| `TasksdOutputLoading` | `Comment` | `<loading output>`, a gap being fetched |
+| `TasksdOutputLost` | `DiagnosticWarn` | `<output lost>`, a gap past recall |
+
+A task's own output is never highlighted — it is the task's text, and this
+plugin has no business colouring it.
+
+Define any of these yourself and the plugin leaves it alone; the links above are
+set with `default`, so yours wins, whether it comes from your config or from a
+colorscheme:
+
+```lua
+vim.api.nvim_set_hl(0, "TasksdOutputExitFailed", { fg = "#ff5f5f", bold = true })
+vim.api.nvim_set_hl(0, "TasksdTaskDir", { link = "Comment" })
+```
+
 ## How it works
 
 Worth knowing when something goes wrong:

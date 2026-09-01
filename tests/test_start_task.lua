@@ -190,22 +190,22 @@ T["open()"]["offers the working directory with $HOME collapsed"] = function()
 end
 
 T["open()"]["starts the output box from the config"] = function()
-  config.setup({ output = { show_on_start = true } })
+  config.setup({ output = { show_on_start = false } })
   local f = start_task.open()
   local values = f:values()
   f:close()
   config.setup({})
-
-  eq(values.show_output, true)
-end
-
-T["open()"]["leaves the output box empty by default"] = function()
-  config.setup({})
-  local f = start_task.open()
-  local values = f:values()
-  f:close()
 
   eq(values.show_output, false)
+end
+
+T["open()"]["ticks the output box by default"] = function()
+  config.setup({})
+  local f = start_task.open()
+  local values = f:values()
+  f:close()
+
+  eq(values.show_output, true)
 end
 
 T["complete_dir()"] = new_set()

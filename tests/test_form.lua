@@ -3,6 +3,7 @@ local new_set = MiniTest.new_set
 local eq = MiniTest.expect.equality
 
 local form = require("tasksd.form")
+local highlights = require("tasksd.highlights")
 
 local KEYS = {
   next_field = "<Tab>",
@@ -40,6 +41,28 @@ local function open_toggle(checked)
   })
 end
 
+---The group the line of field `index` is drawn in, if any. The label on that
+---line is virtual text and carries its group inside the chunk, so it is not one
+---of these.
+---@param f tasksd.Form
+---@param index integer
+---@return string|nil
+local function line_hl(f, index)
+  local marks = vim.api.nvim_buf_get_extmarks(
+    f.buf,
+    -1,
+    { index - 1, 0 },
+    { index - 1, -1 },
+    { details = true }
+  )
+  for _, mark in ipairs(marks) do
+    if mark[4].hl_group then
+      return mark[4].hl_group
+    end
+  end
+  return nil
+end
+
 local T = new_set()
 
 T["form"] = new_set({
@@ -68,6 +91,11 @@ T["form"]["draws labels as inline virtual text"] = function()
   eq(#marks, 2)
   eq(marks[1][4].virt_text_pos, "inline")
   eq(vim.trim(marks[1][4].virt_text[1][1]), "First:")
+end
+
+T["form"]["points the groups the float is drawn with at this plugin's"] = function()
+  local f = open()
+  eq(vim.wo[f.win].winhighlight, highlights.WINHIGHLIGHT.float)
 end
 
 T["form"]["starts on the first field, at the end of the value"] = function()
@@ -363,6 +391,21 @@ T["toggle"]["flips the field and redraws the box"] = function()
 
   eq(f:toggle(2), true)
   eq(f:values().flag, false)
+end
+
+T["toggle"]["colours the box by the state it stands for"] = function()
+  eq(line_hl(open_toggle(false), 2), "TasksdFormToggleOff")
+  eq(line_hl(open_toggle(true), 2), "TasksdFormToggleOn")
+end
+
+T["toggle"]["recolours the box when it flips"] = function()
+  local f = open_toggle(false)
+  f:toggle(2)
+  eq(line_hl(f, 2), "TasksdFormToggleOn")
+end
+
+T["toggle"]["leaves a text field's line uncoloured"] = function()
+  eq(line_hl(open_toggle(true), 1), nil)
 end
 
 -- What the mapping checks before deciding to pass the key on.

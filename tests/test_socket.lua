@@ -30,8 +30,12 @@ local T = new_set({
 
 T["path()"] = new_set()
 
-T["path()"]["defaults to the global socket"] = function()
-  eq(vim.fs.basename(socket.path()), "global.sock")
+-- The default is spelled out rather than compared against `config.default`,
+-- which would agree with itself whatever it said.
+T["path()"]["defaults to one daemon per project"] = function()
+  local default = socket.path()
+  config.setup({ daemon = { socket = "project" } })
+  eq(socket.path(), default)
 end
 
 T["path()"]["puts every built-in scheme under stdpath('state')"] = function()

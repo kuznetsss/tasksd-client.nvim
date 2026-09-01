@@ -98,10 +98,10 @@ T["rows()"]["puts the id, state, command and directory in columns"] = function()
   local rows = task_picker.rows({ entry(3, "running") })
   eq(#rows, 1)
   eq(rows[1].columns, {
-    { text = "3", hl = "Number", align = "right" },
-    { text = "running", hl = "DiagnosticOk" },
-    { text = "sleep 60" },
-    { text = "/tmp", hl = "Directory" },
+    { text = "3", hl = "TasksdTaskId", align = "right" },
+    { text = "running", hl = "TasksdTaskRunning" },
+    { text = "sleep 60", hl = "TasksdTaskCommand" },
+    { text = "/tmp", hl = "TasksdTaskDir" },
   })
 end
 

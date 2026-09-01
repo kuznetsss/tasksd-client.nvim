@@ -1,3 +1,5 @@
+local highlights = require("tasksd.highlights")
+
 ---The one output window: where it opens, how big it is, and where the user
 ---moved it to since. It is handed a buffer and shows it; what is in that
 ---buffer, and which task it belongs to, is `tasksd.output`'s business.
@@ -196,6 +198,8 @@ local function decorate(win, geometry)
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
   vim.wo[win].wrap = false
+  vim.wo[win].winhighlight = geometry.position == "float" and highlights.WINHIGHLIGHT.float
+    or highlights.WINHIGHLIGHT.split
   -- Without these a panel is resized every time a split opens or closes beside
   -- it, because 'equalalways' redistributes the room among all the windows.
   vim.wo[win].winfixheight = geometry.position == "top" or geometry.position == "bottom"
@@ -243,6 +247,8 @@ end
 ---@param opts tasksd.output.window.Opts
 ---@return integer win
 M.open = function(buf, opts)
+  highlights.ensure()
+
   local win = M.win()
   -- An open window has been resized and moved since it opened; where it is now
   -- is the placement to keep, not the one it was last closed at.

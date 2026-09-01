@@ -1,3 +1,4 @@
+local highlights = require("tasksd.highlights")
 local task = require("tasksd.task")
 
 ---A bounded view of one task's output, held in a scratch buffer.
@@ -21,6 +22,14 @@ M.LOADING = "<loading output>"
 ---Stands in for a dropped line the daemon could no longer supply: its own
 ---buffer is bounded too, so a gap reported late may already be past recall.
 M.LOST = "<output lost>"
+
+local ns = vim.api.nvim_create_namespace("tasksd.output")
+
+---@type table<string, string>
+local PLACEHOLDER_HL = {
+  [M.LOADING] = "TasksdOutputLoading",
+  [M.LOST] = "TasksdOutputLost",
+}
 
 ---@param line string
 ---@return string
@@ -70,12 +79,34 @@ function Buffer:replace(from, to, lines)
   vim.bo[self.buf].modifiable = false
 end
 
+---Colour the rows a write has just put down, and only those: a mark stays on
+---the row it was made on, so anything the write replaced has to be cleared
+---rather than left under the new text.
+---@param row integer 0-based row the write started at.
+---@param lines string[] What was written there.
+---@param hl string|nil One group for the lot, when the caller knows what it wrote.
+function Buffer:mark(row, lines, hl)
+  vim.api.nvim_buf_clear_namespace(self.buf, ns, row, row + #lines)
+  for i, line in ipairs(lines) do
+    local group = hl or PLACEHOLDER_HL[line]
+    if group then
+      vim.api.nvim_buf_set_extmark(self.buf, ns, row + i - 1, 0, {
+        end_col = #line,
+        hl_group = group,
+      })
+    end
+  end
+end
+
 ---Drop the oldest rows once the ring is over its size.
 function Buffer:trim()
   local extra = self.rows - self.max_lines
   if extra <= 0 then
     return
   end
+  -- Deleting a line does not take its extmarks with it -- they collapse onto
+  -- the row the deletion started at -- so the marks go first.
+  vim.api.nvim_buf_clear_namespace(self.buf, ns, 0, extra)
   self:replace(0, extra, {})
   self.rows = self.rows - extra
   self.first = self.first + extra
@@ -113,6 +144,8 @@ function Buffer:write(from_line, lines)
   end
 
   self:replace(row, math.min(row + #lines, self.rows), lines)
+  -- Before the trim, which is what moves these rows.
+  self:mark(row, lines)
   self.rows = math.max(self.rows, row + #lines)
   self:trim()
 end
@@ -155,8 +188,12 @@ end
 ---output is held. It takes no row of its own, so output still lands in front of
 ---it.
 ---@param text string
-function Buffer:note(text)
-  self:replace(self.rows, self.rows, { ("[%s]"):format(text) })
+---@param hl string|nil Defaults to `TasksdOutputNote`.
+function Buffer:note(text, hl)
+  local line = ("[%s]"):format(text)
+  local row = self.rows
+  self:replace(row, row, { line })
+  self:mark(row, { line }, hl or "TasksdOutputNote")
 end
 
 ---Write how the task ended, after its last line of output. Ignored the second
@@ -168,7 +205,11 @@ function Buffer:finish(params)
     return
   end
   self.finished = true
-  self:note(task.exit_message(params))
+  local message, level = task.exit_message(params)
+  self:note(
+    message,
+    level >= vim.log.levels.WARN and "TasksdOutputExitFailed" or "TasksdOutputExit"
+  )
 end
 
 function Buffer:close()
@@ -191,6 +232,7 @@ M.new = function(opts)
   vim.validate("max_lines", opts.max_lines, "number")
   vim.validate("name", opts.name, "string", true)
   assert(opts.max_lines >= 1, "max_lines must be at least 1")
+  highlights.ensure()
 
   local buf = vim.api.nvim_create_buf(false, true)
   if opts.name then

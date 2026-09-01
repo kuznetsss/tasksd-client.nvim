@@ -2,6 +2,7 @@ local MiniTest = require("mini.test")
 local new_set = MiniTest.new_set
 local eq = MiniTest.expect.equality
 
+local highlights = require("tasksd.highlights")
 local window = require("tasksd.output.window")
 
 ---@type tasksd.output.Placement
@@ -75,6 +76,14 @@ T["open()"]["centres a float at the configured size"] = function()
   local at = place(win)
   eq(at.width, math.floor(vim.o.columns * 0.5))
   eq(at.height, 8)
+end
+
+T["open()"]["points the groups the window is drawn with at this plugin's"] = function()
+  local split = open({ position = "bottom" })
+  eq(vim.wo[split].winhighlight, highlights.WINHIGHLIGHT.split)
+
+  local float = open({ position = "float" })
+  eq(vim.wo[float].winhighlight, highlights.WINHIGHLIGHT.float)
 end
 
 T["open()"]["rejects a position it cannot place"] = function()
