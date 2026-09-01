@@ -30,6 +30,14 @@ M.default = {
       cancel = "<Esc>",
     },
   },
+  shell = {
+    -- Whether a command that contains any of `syntax` is run through a shell
+    -- even when the start-task form's "Shell" box is unticked.
+    auto = true,
+    -- Substrings that mean a command needs a shell to run as written. Taken
+    -- literally, not as patterns.
+    syntax = { "&&" },
+  },
   output = {
     -- Where the output window opens; see `tasksd.output.window`.
     --   'left' | 'right' | 'top' | 'bottom' | 'float'
@@ -63,9 +71,32 @@ M.default = {
 
 M.current = vim.deepcopy(M.default)
 
+---`vim.tbl_deep_extend` is not used: it merges a list index by index, so a
+---`shell.syntax` shorter than the default one keeps the default's tail. A list
+---option replaces the default outright.
+---
+---Which of the two an option is comes from the *default*: to `vim.islist` an
+---empty table is a list, so reading the given value's shape would make
+---`form = { keys = {} }` unmap every key rather than change nothing.
+---@param default table
+---@param opts table
+---@return table
+local function extend(default, opts)
+  local merged = vim.deepcopy(default)
+  for key, value in pairs(opts) do
+    local into = merged[key]
+    if type(value) == "table" and type(into) == "table" and not vim.islist(into) then
+      merged[key] = extend(into, value)
+    else
+      merged[key] = vim.deepcopy(value)
+    end
+  end
+  return merged
+end
+
 ---@param opts table|nil
 M.setup = function(opts)
-  M.current = vim.tbl_deep_extend("force", M.default, opts or {})
+  M.current = extend(M.default, opts or {})
 end
 
 return M

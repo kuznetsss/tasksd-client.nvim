@@ -150,19 +150,17 @@ completes the handshake, and then does what you asked.
 opens a small floating form:
 
 ```
-┌──────────────── Start task ────────────────┐
-│ Command:            cargo test             │
-│ Working directory:  ~/src/myproject        │
-│ Show output:        [x]                    │
-└────────────────────────────────────────────┘
+┌───────────────────────── Start task ─────────────────────────┐
+│ Command:                    cargo test                       │
+│ Working directory:          ~/src/myproject                  │
+│ Show output:                [x]                              │
+│ Shell (autoshell enabled):  [ ]                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-- **Command** — an executable and its arguments, split on whitespace. No shell
-  is involved and quoting is not honoured, so globs, pipes and `&&` are not
-  interpreted, and an argument containing a space cannot be expressed:
-  `bash -c "make && ./run"` reaches the daemon as four separate arguments and
-  does not do what it looks like. Put a pipeline in a script and run the
-  script.
+- **Command** — an executable and its arguments, split on whitespace. Unless a
+  shell is involved (below) quoting is not honoured, so globs and pipes are not
+  interpreted and an argument containing a space cannot be expressed.
 - **Working directory** — prefilled with Neovim's current directory. A relative
   path is resolved against Neovim's cwd before being sent, because the daemon
   would otherwise resolve it against *its* cwd, which is wherever it happened
@@ -171,6 +169,12 @@ opens a small floating form:
   subscribes as part of the start request, which is what guarantees you see the
   task's very first lines; subscribing after the fact starts from wherever the
   output has already got to.
+- **Shell** — run the command as `sh -c '<command>'` instead of spawning it
+  directly. Ticking the box forces that; with **autoshell** on, a command
+  containing anything in `shell.syntax` — `&&` by default — gets a shell of its
+  own accord, which is why the label says whether autoshell is armed. `sh`
+  rather than `$SHELL`: the daemon is what spawns it, and an interactive
+  shell's rc files can change what the command means.
 
 Keys inside the form (all configurable):
 
@@ -318,7 +322,8 @@ tasks, whoever started them.
 ## Configuration
 
 Call `setup()` with anything you want to change; it is deep-merged over the
-defaults, so partial tables are fine. Here is the whole default table:
+defaults, so partial tables are fine. A list — `shell.syntax` — replaces the
+default rather than merging into it. Here is the whole default table:
 
 ```lua
 require("tasksd").setup({
@@ -330,7 +335,7 @@ require("tasksd").setup({
     task_buffer_size = 10000, -- lines the daemon keeps per task
     graceful_period = 5,      -- seconds a task gets to exit before it is killed
     log_file = nil,           -- absolute path; a detached daemon has no console
-    socket = "global",        -- which daemon to talk to; see below
+    socket = "project",       -- which daemon to talk to; see below
     detached = true,          -- survive this Neovim exiting
   },
   form = {
@@ -343,11 +348,16 @@ require("tasksd").setup({
       cancel = "<Esc>",
     },
   },
+  shell = {
+    auto = true,              -- run a command containing `syntax` through a shell
+    syntax = { "&&" },        -- substrings that mean a command needs one
+  },
   output = {
     position = "bottom",      -- 'left'|'right'|'top'|'bottom'|'float'
     size = "30%",             -- count of lines/columns, or a percentage
-    max_lines = 5000,         -- rows kept in the output buffer
-    show_on_start = false,    -- whether the form's "Show output" starts ticked
+    max_lines = 10000,        -- rows kept in the output buffer
+    autoscroll = true,        -- follow new output when the cursor is on the last line
+    show_on_start = true,     -- whether the form's "Show output" starts ticked
   },
   picker = "auto",            -- 'auto'|'snacks'|'select'|function(spec)
   install = {
@@ -365,10 +375,10 @@ two that compute different paths each get their own. Sockets live under
 
 | Value | Meaning |
 | ----- | ------- |
-| `"global"` | One daemon for every Neovim instance. The default, and the one that makes tasks visible everywhere. |
+| `"global"` | One daemon for every Neovim instance, and the one that makes tasks visible everywhere. |
 | `"nvim_instance"` | One daemon per Neovim process. Gives up the main reason tasksd detaches tasks: the next Neovim addresses a different daemon and never sees them again. |
 | `"pwd"` | One daemon per working directory, literally — `nvim` started in `~/p/src` addresses a different daemon than one started in `~/p`. |
-| `"project"` | One daemon per version control root (`.git`, `.jj`, `.hg`, `.svn`) above the working directory, falling back to `pwd` when there is no root. |
+| `"project"` | One daemon per version control root (`.git`, `.jj`, `.hg`, `.svn`) above the working directory, falling back to `pwd` when there is no root. The default. |
 | `function(): string` | Any scheme you like — per git worktree, per tmux session. It owns the path completely, including creating the directory. |
 
 Both directory-based schemes use Neovim's *global* cwd, not the window's, so
@@ -525,7 +535,7 @@ Integration tests need a real tasksd binary and skip themselves without one;
 - [x] Readme file
 - [x] Highlights
 - [x] Remove references to the local build
-- [ ] Auto shell (use `sh -c` if `&&` or any other shell syntax is detected)
+- [x] Auto shell (use `sh -c` if `&&` or any other shell syntax is detected)
 - [ ] Repeatable named tasks
 - [ ] Check available lua api
 - [ ] Documentation

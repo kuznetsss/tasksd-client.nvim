@@ -118,10 +118,44 @@ T["split()"]["reports an empty command"] = function()
 end
 
 --------------------------------------------------------------------------------
+-- shell
+--------------------------------------------------------------------------------
+
+-- These cases change `config.current`, which `require` keeps between them.
+local restores_config = { hooks = {
+  post_case = function()
+    config.setup({})
+  end,
+} }
+
+T["needs_shell()"] = new_set(restores_config)
+
+T["needs_shell()"]["spots what a shell has to interpret"] = function()
+  eq(start_task.needs_shell("make && ./run"), true)
+end
+
+T["needs_shell()"]["leaves a plain command alone"] = function()
+  eq(start_task.needs_shell("cargo build --release"), false)
+end
+
+T["needs_shell()"]["takes the whole syntax list from the config"] = function()
+  config.setup({ shell = { syntax = { "|" } } })
+  eq(start_task.needs_shell("make && ./run"), false)
+  eq(start_task.needs_shell("ls | wc -l"), true)
+end
+
+-- `&&` is a substring match, so a pattern character in the list is one too.
+T["needs_shell()"]["matches literally, not as a pattern"] = function()
+  config.setup({ shell = { syntax = { "$(" } } })
+  eq(start_task.needs_shell("echo $(date)"), true)
+  eq(start_task.needs_shell("echo xy"), false)
+end
+
+--------------------------------------------------------------------------------
 -- params
 --------------------------------------------------------------------------------
 
-T["params()"] = new_set()
+T["params()"] = new_set(restores_config)
 
 T["params()"]["builds the request from the form values"] = function()
   local params = start_task.params({ working_dir = "/tmp", command = "ls -la" })
@@ -141,6 +175,31 @@ T["params()"]["subscribes to the output when the box is ticked"] = function()
 
   params = assert(start_task.params({ command = "ls", show_output = false }))
   eq(params.subscribe_to_output, false)
+end
+
+T["params()"]["runs the command through a shell when the box is ticked"] = function()
+  local params = assert(start_task.params({ command = "ls -la", shell = true }))
+  eq(params.executable, "sh")
+  eq(params.args, { "-c", "ls -la" })
+end
+
+T["params()"]["runs a command that needs a shell through one unasked"] = function()
+  local params = assert(start_task.params({ command = "make && ./run" }))
+  eq(params.executable, "sh")
+  eq(params.args, { "-c", "make && ./run" })
+end
+
+T["params()"]["splits the command as written when autoshell is off"] = function()
+  config.setup({ shell = { auto = false } })
+  local params = assert(start_task.params({ command = "make && ./run" }))
+  eq(params.executable, "make")
+  eq(params.args, { "&&", "./run" })
+end
+
+T["params()"]["refuses an empty command even with the box ticked"] = function()
+  local params, err = start_task.params({ command = "   ", shell = true })
+  eq(params, nil)
+  eq(err, "no command given")
 end
 
 T["params()"]["refuses an empty command"] = function()
@@ -204,6 +263,25 @@ T["open()"]["ticks the output box by default"] = function()
   f:close()
 
   eq(values.show_output, true)
+end
+
+T["open()"]["leaves the shell box unticked"] = function()
+  config.setup({})
+  local f = start_task.open()
+  local values = f:values()
+  f:close()
+
+  eq(values.shell, false)
+end
+
+T["shell_label()"] = new_set(restores_config)
+
+T["shell_label()"]["says whether autoshell is armed"] = function()
+  config.setup({})
+  eq(start_task.shell_label(), "Shell (autoshell enabled): ")
+
+  config.setup({ shell = { auto = false } })
+  eq(start_task.shell_label(), "Shell: ")
 end
 
 T["complete_dir()"] = new_set()

@@ -32,6 +32,20 @@ T["setup()"]["merges deeply, keeping untouched defaults"] = function()
   eq(config.current.daemon.detached, true)
 end
 
+-- `vim.tbl_deep_extend` would merge this list index by index and hand back the
+-- default's entries.
+T["setup()"]["replaces a list instead of merging into it"] = function()
+  config.setup({ shell = { syntax = {} } })
+  eq(config.current.shell.syntax, {})
+  eq(config.current.shell.auto, true)
+end
+
+-- The default is a map, so an empty table given for it is one too.
+T["setup()"]["merges into a map, even given an empty table"] = function()
+  config.setup({ form = { keys = {} } })
+  eq(config.current.form.keys, config.default.form.keys)
+end
+
 T["setup()"]["does not mutate the defaults table"] = function()
   local before = config.default.daemon.threads_number
   config.setup({ daemon = { threads_number = 99 } })

@@ -20,6 +20,19 @@ M.split = function(command)
   return words[1], vim.list_slice(words, 2)
 end
 
+---Whether `command` holds anything only a shell can make sense of. Every entry
+---of `shell.syntax` is matched literally.
+---@param command string
+---@return boolean
+M.needs_shell = function(command)
+  for _, item in ipairs(config.current.shell.syntax) do
+    if command:find(item, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
 ---The `task.start` params; see `docs/API.md` in tasksd.
 ---@class tasksd.TaskStartParams
 ---@field executable string
@@ -31,10 +44,17 @@ end
 ---@param values table<string, string|boolean>
 ---@return tasksd.TaskStartParams|nil params, string|nil err
 M.params = function(values)
-  local command = values.command
-  local executable, args = M.split(type(command) == "string" and command or "")
+  local input = values.command
+  local command = vim.trim(type(input) == "string" and input or "")
+  local executable, args = M.split(command)
   if not executable then
     return nil, "no command given"
+  end
+
+  if values.shell == true or (config.current.shell.auto and M.needs_shell(command)) then
+    -- `sh` rather than `vim.o.shell`: the daemon is what spawns this, and an
+    -- interactive login shell's rc files can change what the command means.
+    executable, args = "sh", { "-c", command }
   end
 
   -- The daemon resolves a relative `working_dir` against its own cwd, which is
@@ -119,6 +139,13 @@ M.complete_command = function(before)
   return start, vim.fn.getcompletion(lead, "file")
 end
 
+---The box forces a shell; autoshell can still turn one on when it is unticked,
+---so the label says whether that is armed.
+---@return string
+M.shell_label = function()
+  return config.current.shell.auto and "Shell (autoshell enabled): " or "Shell: "
+end
+
 ---@return tasksd.Form
 M.open = function()
   return form.open({
@@ -140,6 +167,11 @@ M.open = function()
         label = "Show output: ",
         type = "toggle",
         value = config.current.output.show_on_start,
+      },
+      {
+        name = "shell",
+        label = M.shell_label(),
+        type = "toggle",
       },
     },
     on_submit = M.start,
