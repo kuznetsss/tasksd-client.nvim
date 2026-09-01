@@ -219,7 +219,8 @@ The window is a single, reusable panel:
   subscription's: closing sends `task.unsubscribe` and drops the buffer, so the
   daemon stops sending output nobody is looking at.
 - **It follows the tail unless you scroll.** New lines move the cursor to the
-  bottom only if it was already there.
+  bottom only if it was already there. `output.autoscroll = false` turns the
+  following off entirely.
 - **It is bounded.** `output.max_lines` rows are kept; older ones fall off the
   top.
 
@@ -522,7 +523,7 @@ Integration tests need a real tasksd binary and skip themselves without one;
 - [x] picker integration
 - [x] output buffer
 - [x] Readme file
-- [ ] Highlights
+- [x] Highlights
 - [ ] Remove references to the local build
 - [ ] Check available lua api
 - [ ] Documentation

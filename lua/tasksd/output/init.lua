@@ -91,11 +91,15 @@ end
 
 ---Run `write` and keep the view on the last line, unless the user has scrolled
 ---up. Sampled before the write, because the write is what moves the end.
+---
+---Moving the cursor is the scroll: there is no way to scroll a window that does
+---not hold the focus, but a cursor put on the last line drags the view with it.
 ---@param s tasksd.output.Session
 ---@param write fun()
 local function tailing(s, write)
   local win = window.win()
-  local following = win
+  local following = config.current.output.autoscroll
+    and win
     and vim.api.nvim_win_get_buf(win) == s.buffer.buf
     and vim.api.nvim_win_get_cursor(win)[1] >= vim.api.nvim_buf_line_count(s.buffer.buf)
 
@@ -130,7 +134,11 @@ local function listen(s)
   end)
 
   on("task.missed_output", function(params)
-    s.buffer:missed(params)
+    -- Reserving rows for a gap at the tail moves the end too, so it has to
+    -- follow like output does or the cursor is left behind for good.
+    tailing(s, function()
+      s.buffer:missed(params)
+    end)
     fetch(s, params)
   end)
 

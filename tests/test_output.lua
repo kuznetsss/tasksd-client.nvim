@@ -144,6 +144,44 @@ T["show()"]["keeps the view on the last line as output arrives"] = function()
   eq(vim.api.nvim_win_get_cursor(win)[1], vim.api.nvim_buf_line_count(assert(shown())))
 end
 
+---Wait for the window to hold more lines than it does now.
+local function grows()
+  local count = vim.api.nvim_buf_line_count(assert(shown()))
+  until_("more output", function()
+    local buf = shown()
+    return buf ~= nil and vim.api.nvim_buf_line_count(buf) > count
+  end)
+end
+
+T["show()"]["leaves the cursor where the user put it"] = function()
+  local id = start(ticker())
+  output.show(id)
+  -- More than one line, so putting the cursor on the first is a scroll away
+  -- from the tail rather than a no-op.
+  until_("the task's output", function()
+    return #lines() >= 3
+  end)
+
+  local win = assert(window.win())
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  grows()
+
+  eq(vim.api.nvim_win_get_cursor(win)[1], 1)
+end
+
+T["show()"]["does not follow the tail with autoscroll off"] = function()
+  config.current.output.autoscroll = false
+  local id = start(ticker())
+  output.show(id)
+  until_("the task's output", function()
+    return has(lines(), "tick")
+  end)
+  grows()
+
+  local win = assert(window.win())
+  eq(vim.api.nvim_win_get_cursor(win)[1], 1)
+end
+
 T["show()"]["writes how the task ended"] = function()
   local id = start({ "sh", "-c", "echo one; sleep 0.3" })
   output.show(id)

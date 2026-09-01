@@ -39,6 +39,9 @@ M.default = {
     -- given them separately as `{ width = ..., height = ... }`.
     size = "30%",
     max_lines = 10000, -- lines
+    -- Whether new output moves the cursor to the last line when it was
+    -- already there. Off leaves the view wherever you put it.
+    autoscroll = true,
     -- Whether the start-task form's "Show output" box starts ticked.
     show_on_start = true,
   },
