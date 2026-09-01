@@ -13,7 +13,7 @@ M.default = {
     --   'pwd'           -- one daemon per working directory
     --   'project'       -- one daemon per version control root above it
     --   function() -> string -- a path of your own
-    socket = "global",
+    socket = "project",
     detached = true,
   },
   form = {
@@ -38,9 +38,9 @@ M.default = {
     -- only the dimension its position implies; a float uses both, and can be
     -- given them separately as `{ width = ..., height = ... }`.
     size = "30%",
-    max_lines = 5000, -- lines
+    max_lines = 10000, -- lines
     -- Whether the start-task form's "Show output" box starts ticked.
-    show_on_start = false,
+    show_on_start = true,
   },
   -- Which picker shows a list; see `tasksd.picker`.
   --   'auto'   -- snacks.nvim when it is there, else 'select'
