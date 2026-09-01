@@ -524,14 +524,15 @@ Integration tests need a real tasksd binary and skip themselves without one;
 - [x] output buffer
 - [x] Readme file
 - [x] Highlights
-- [ ] Remove references to the local build
+- [x] Remove references to the local build
+- [ ] Auto shell (use `sh -c` if `&&` or any other shell syntax is detected)
+- [ ] Repeatable named tasks
 - [ ] Check available lua api
 - [ ] Documentation
 - [ ] CI
 
 Other features:
 - [ ] Output buffer slots
-- [ ] Repeatable task with slots
 
 Requires tasksd 0.3.0:
 - [ ] Preview of a task in picker

@@ -9,11 +9,6 @@ local pin = require("tasksd.install.pin")
 
 local temps = {}
 
--- There is no automated tasksd installation yet, so the integration tests run
--- against a local build. Override with TASKSD_BIN=/path/to/tasksd.
-local TASKSD = os.getenv("TASKSD_BIN")
-  or vim.fn.expand("~/Documents/rust/tasksd/target/debug/tasksd")
-
 ---@return string|nil
 local function flag_value(argv, flag)
   for i, value in ipairs(argv) do
@@ -29,7 +24,7 @@ end
 local T = new_set({
   hooks = {
     pre_case = function()
-      config.setup({ daemon = { path = TASKSD } })
+      config.setup({ daemon = { path = "/bin/sh" } })
     end,
     post_once = function()
       for _, path in ipairs(temps) do
@@ -154,7 +149,7 @@ end
 -- Unchecked, a renamed or misspelled option reaches the daemon as the literal
 -- string "nil", which tasksd rejects with an opaque clap error.
 T["argv()"]["rejects a non-numeric option instead of passing nil"] = function()
-  config.setup({ daemon = { path = TASKSD, thread_number = "many" } })
+  config.setup({ daemon = { path = "/bin/sh", thread_number = "many" } })
   MiniTest.expect.error(function()
     daemon.argv("/tmp/x.sock")
   end, "thread_number must be a number")
@@ -273,10 +268,10 @@ T["ensure()"]["hands its callback back on the main loop"] = function()
 end
 
 T["argv()"]["omits --log-file unless configured"] = function()
-  config.setup({ daemon = { path = TASKSD } })
+  config.setup({ daemon = { path = "/bin/sh" } })
   eq(flag_value(daemon.argv("/tmp/x.sock"), "--log-file"), nil)
 
-  config.setup({ daemon = { path = TASKSD, log_file = "/tmp/tasksd.log" } })
+  config.setup({ daemon = { path = "/bin/sh", log_file = "/tmp/tasksd.log" } })
   eq(flag_value(daemon.argv("/tmp/x.sock"), "--log-file"), "/tmp/tasksd.log")
 end
 

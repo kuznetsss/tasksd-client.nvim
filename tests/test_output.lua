@@ -8,17 +8,14 @@ local output = require("tasksd.output")
 local start_task = require("tasksd.command.start_task")
 local window = require("tasksd.output.window")
 
--- There is no automated tasksd installation yet, so the integration tests run
--- against a local build. Override with TASKSD_BIN=/path/to/tasksd.
 local TASKSD = os.getenv("TASKSD_BIN")
-  or vim.fn.expand("~/Documents/rust/tasksd/target/debug/tasksd")
 
 -- Short path on purpose: unix socket paths are capped near 104 bytes.
 local SOCKET = ("/tmp/tasksd-nvim-output-%d.sock"):format(vim.uv.os_getpid())
 
 local function needs_tasksd()
-  if vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip(("no tasksd binary at %s (set TASKSD_BIN)"):format(TASKSD))
+  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
+    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
   end
 end
 

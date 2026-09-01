@@ -7,13 +7,11 @@ local config = require("tasksd.config")
 local log = require("tasksd.log")
 local start_task = require("tasksd.command.start_task")
 
--- Same local build the other integration tests use; see tests/test_client.lua.
 local TASKSD = os.getenv("TASKSD_BIN")
-  or vim.fn.expand("~/Documents/rust/tasksd/target/debug/tasksd")
 
 local function needs_tasksd()
-  if vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip(("no tasksd binary at %s (set TASKSD_BIN)"):format(TASKSD))
+  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
+    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
   end
 end
 

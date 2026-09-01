@@ -7,18 +7,15 @@ local config = require("tasksd.config")
 local install = require("tasksd.install")
 local pin = require("tasksd.install.pin")
 
--- There is no automated tasksd installation yet, so the integration tests run
--- against a local build. Override with TASKSD_BIN=/path/to/tasksd.
 local TASKSD = os.getenv("TASKSD_BIN")
-  or vim.fn.expand("~/Documents/rust/tasksd/target/debug/tasksd")
 
 --------------------------------------------------------------------------------
 -- Helpers
 --------------------------------------------------------------------------------
 
 local function needs_tasksd()
-  if vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip(("no tasksd binary at %s (set TASKSD_BIN)"):format(TASKSD))
+  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
+    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
   end
 end
 
