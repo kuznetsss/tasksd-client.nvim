@@ -46,6 +46,11 @@ M.default = {
     -- only the dimension its position implies; a float uses both, and can be
     -- given them separately as `{ width = ..., height = ... }`.
     size = "30%",
+    -- How much darker than `Normal` the panel's background is, so it stands
+    -- out from the editor; see `tasksd.highlights`. Only a split is shaded --
+    -- a float already has `NormalFloat`.
+    --   true | false | a percentage such as '50%'
+    shade = true,
     max_lines = 10000, -- lines
     -- Whether new output moves the cursor to the last line when it was
     -- already there. Off leaves the view wherever you put it.

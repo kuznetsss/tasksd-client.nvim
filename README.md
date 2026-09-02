@@ -392,6 +392,7 @@ require("tasksd").setup({
   output = {
     position = "bottom",      -- 'left'|'right'|'top'|'bottom'|'float'
     size = "30%",             -- count of lines/columns, or a percentage
+    shade = true,             -- how much darker than `Normal` a split panel is; false, or "50%"
     max_lines = 10000,        -- rows kept in the output buffer
     autoscroll = true,        -- follow new output when the cursor is on the last line
     show_on_start = true,     -- whether the form's "Show output" starts ticked
@@ -488,11 +489,11 @@ form = { keys = { next_field = "<C-n>", prev_field = "<C-p>", cancel = "" } }
 ## Highlights
 
 Everything the plugin draws goes through a `Tasksd*` highlight group, each
-linked by default to a group your colorscheme already defines:
+falling back to something your colorscheme already defines:
 
 | Group | Default | Where |
 | ----- | ------- | ----- |
-| `TasksdNormal` | `Normal` | Output panel, when it is a split |
+| `TasksdNormal` | `Normal`, shaded | Output panel, when it is a split |
 | `TasksdNormalFloat` | `NormalFloat` | Output panel and start-task form, when floating |
 | `TasksdBorder` | `FloatBorder` | Border of either float |
 | `TasksdTitle` | `FloatTitle` | Title in that border |
@@ -521,6 +522,22 @@ colorscheme:
 vim.api.nvim_set_hl(0, "TasksdOutputExitFailed", { fg = "#ff5f5f", bold = true })
 vim.api.nvim_set_hl(0, "TasksdTaskDir", { link = "Comment" })
 ```
+
+### Shading
+
+A split has the editor's own background, which leaves the output panel hard to
+tell from a file. `TasksdNormal` is therefore not a plain link: its default is
+your colorscheme's `Normal` darkened by 30%, so the panel reads as a panel. A
+float is left alone — `NormalFloat` already sets it apart.
+
+```lua
+output = { shade = true }  -- false for none, or "50%" for an amount of your own
+```
+
+The shade is recomputed whenever you change colorscheme, and is skipped
+altogether when `Normal` has no background of its own, so a transparent
+colorscheme stays transparent. Defining `TasksdNormal` yourself overrides it,
+shading and all.
 
 ## How it works
 
@@ -585,3 +602,11 @@ Integration tests need a real tasksd binary and skip themselves without one;
 Requires tasksd 0.3.0:
 - [ ] Preview of a task in picker
 - [ ] Task info in the output window
+
+## Acknowledgements
+
+[toggleterm.nvim](https://github.com/akinsho/toggleterm.nvim) is where the
+shaded panel comes from — both the idea that a window which is not a file should
+not share the editor's background, and the way it is worked out: take
+`Normal`'s background, multiply each channel by `(100 - percent) / 100`, and
+recompute on `ColorScheme`. Its default of 30% is this plugin's default too.

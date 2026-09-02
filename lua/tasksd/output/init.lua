@@ -13,8 +13,10 @@ local window = require("tasksd.output.window")
 ---looking at. There is one of these at a time; output window slots turn it into
 ---a table keyed by slot.
 ---
----This is the only module that reads `config.current.output`: `window.lua` and
----`buffer.lua` are told their sizes.
+---`window.lua` and `buffer.lua` are told their sizes rather than reading
+---`config.current.output` for themselves. The one other module that reads it is
+---`highlights.lua`, for `shade`: a highlight group has no caller to be told by,
+---and it is read when the group is defined rather than when a window opens.
 local M = {}
 
 ---`docs/API.md` in tasksd: the task has already exited.
