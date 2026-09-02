@@ -16,6 +16,8 @@ M.subcommands = {
   install = require("tasksd.command.install"),
   list_tasks = require("tasksd.command.list_tasks"),
   output = require("tasksd.command.output"),
+  -- Quoted: `repeat` is a Lua keyword, so a bare key here is a syntax error.
+  ["repeat"] = require("tasksd.command.repeat"),
   send_input = require("tasksd.command.send_input"),
   send_signal = require("tasksd.command.send_signal"),
   shutdown = require("tasksd.command.shutdown"),

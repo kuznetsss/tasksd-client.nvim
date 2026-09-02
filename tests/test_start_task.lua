@@ -4,6 +4,7 @@ local eq = MiniTest.expect.equality
 
 local client = require("tasksd.client")
 local config = require("tasksd.config")
+local last = require("tasksd.last")
 local log = require("tasksd.log")
 local start_task = require("tasksd.command.start_task")
 
@@ -61,7 +62,7 @@ end
 ---Run `start` against a daemon of this case's own.
 ---@param values table<string, string>
 ---@param count integer How many messages the case expects.
----@return tests.Message[]
+---@return tests.Message[] messages, string socket
 local function start_sync(values, count)
   local socket = new_socket()
   config.setup({
@@ -78,7 +79,7 @@ local function start_sync(values, count)
   end)
 
   client.reset()
-  return messages
+  return messages, socket
 end
 
 local T = new_set({
@@ -326,6 +327,34 @@ T["start()"]["reports the id the daemon assigned"] = function()
 
   eq(messages[1].level, vim.log.levels.INFO)
   eq(messages[1].msg:match("^started `true` as task %d+$") ~= nil, true)
+end
+
+T["start()"]["remembers the task it started"] = function()
+  needs_tasksd()
+
+  local _, socket = start_sync({ working_dir = "/tmp", command = "true" }, 1)
+
+  -- Asked as a later connection to the same socket, which is what a restarted
+  -- daemon looks like: the params carry over, the id does not.
+  local other = { socket_path = socket }
+  ---@cast other tasksd.Client
+  local found, id = last.for_client(other)
+  local params = assert(found, "nothing was recorded")
+  eq(params.executable, "true")
+  eq(params.working_dir, "/tmp/")
+  eq(id, nil)
+
+  last.reset()
+end
+
+T["start()"]["remembers nothing when the daemon refused"] = function()
+  needs_tasksd()
+
+  local _, socket = start_sync({ working_dir = "/no/such/directory", command = "true" }, 1)
+
+  local other = { socket_path = socket }
+  ---@cast other tasksd.Client
+  eq(last.for_client(other), nil)
 end
 
 T["start()"]["reports a rejected request with the daemon's reason"] = function()

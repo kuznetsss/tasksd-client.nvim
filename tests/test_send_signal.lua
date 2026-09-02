@@ -4,6 +4,7 @@ local eq = MiniTest.expect.equality
 
 local client = require("tasksd.client")
 local config = require("tasksd.config")
+local last = require("tasksd.last")
 local log = require("tasksd.log")
 local send_signal = require("tasksd.command.send_signal")
 local start_task = require("tasksd.command.start_task")
@@ -117,6 +118,7 @@ local T = new_set({
   hooks = {
     post_case = function()
       config.setup({})
+      last.reset()
     end,
     post_once = function()
       for _, path in ipairs(sockets) do
@@ -194,7 +196,17 @@ end
 T["params()"]["rejects a task id that is not a number"] = function()
   local params, err = send_signal.params({ "task_id=abc" })
   eq(params, nil)
-  eq(err, "`abc` is not a task id")
+  eq(err, "expected a task id or `last`, got `abc`")
+end
+
+-- Carried through as it stands: only a connection can put a number to it.
+T["params()"]["takes `last` in place of an id"] = function()
+  eq(send_signal.params({ "task_id=last", "signal=9" }), { task_id = "last", signal = 9 })
+end
+
+T["params()"]["defaults to TERM for `last` too"] = function()
+  local params = assert(send_signal.params({ "task_id=last" }))
+  eq(params.signal, vim.uv.constants.SIGTERM)
 end
 
 T["params()"]["rejects a bare word"] = function()
@@ -207,6 +219,67 @@ T["params()"]["rejects an unknown key"] = function()
   local params, err = send_signal.params({ "task=3" })
   eq(params, nil)
   eq(tostring(err):match("^unknown argument `task`") ~= nil, true)
+end
+
+--------------------------------------------------------------------------------
+-- resolve
+--------------------------------------------------------------------------------
+
+---`resolve` only ever reads `last` off a connection, which compares it by
+---identity and keys it by socket path.
+---@param socket_path string
+---@return tasksd.Client
+local function fake_client(socket_path)
+  local c = { socket_path = socket_path }
+  ---@cast c tasksd.Client
+  return c
+end
+
+---@type tasksd.TaskStartParams
+local STARTED = {
+  executable = "sleep",
+  args = { "60" },
+  working_dir = "/tmp",
+  subscribe_to_output = false,
+}
+
+T["resolve()"] = new_set()
+
+T["resolve()"]["leaves a numbered task alone"] = function()
+  local params = send_signal.resolve({ task_id = 3, signal = 9 }, fake_client("/tmp/a.sock"))
+  eq(params, { task_id = 3, signal = 9 })
+end
+
+T["resolve()"]["puts the last task's id in place of `last`"] = function()
+  local c = fake_client("/tmp/a.sock")
+  last.record(c, 7, STARTED)
+
+  local params = send_signal.resolve({ task_id = "last", signal = 9 }, c)
+  eq(params, { task_id = 7, signal = 9 })
+end
+
+T["resolve()"]["says so when nothing has been started here"] = function()
+  local c = fake_client("/tmp/a.sock")
+  local params, err = send_signal.resolve({ task_id = "last", signal = 9 }, c)
+  eq(params, nil)
+  eq(tostring(err):match("^no task to signal") ~= nil, true)
+end
+
+-- The other daemon's task is none of this one's business.
+T["resolve()"]["does not reach across sockets"] = function()
+  last.record(fake_client("/tmp/a.sock"), 7, STARTED)
+
+  local params = send_signal.resolve({ task_id = "last", signal = 9 }, fake_client("/tmp/b.sock"))
+  eq(params, nil)
+end
+
+-- A later connection to the same socket may be a restarted daemon, whose id
+-- counter began again at 1.
+T["resolve()"]["refuses an id from an earlier connection"] = function()
+  last.record(fake_client("/tmp/a.sock"), 7, STARTED)
+
+  local params = send_signal.resolve({ task_id = "last", signal = 9 }, fake_client("/tmp/a.sock"))
+  eq(params, nil)
 end
 
 --------------------------------------------------------------------------------
@@ -231,8 +304,15 @@ T["complete()"]["filters signal names by prefix, ignoring case"] = function()
   eq(send_signal.complete("signal=ter"), { "signal=TERM" })
 end
 
-T["complete()"]["offers nothing for a task id"] = function()
-  eq(send_signal.complete("task_id="), {})
+-- The ids are behind a request and completion answers synchronously; `last` is
+-- the one value that is known here.
+T["complete()"]["offers only `last` for a task id"] = function()
+  eq(send_signal.complete("task_id="), { "task_id=last" })
+end
+
+T["complete()"]["filters `last` by prefix"] = function()
+  eq(send_signal.complete("task_id=la"), { "task_id=last" })
+  eq(send_signal.complete("task_id=x"), {})
 end
 
 T["complete()"]["is reachable from the command line"] = function()
@@ -319,6 +399,45 @@ T["send()"]["signals a running task, which then reports its exit"] = function()
   eq(sent.level, vim.log.levels.INFO)
 
   eq(find(messages, ("^task %s was killed by signal %%d+$"):format(task_id)) ~= nil, true)
+
+  client.reset()
+end
+
+-- The whole `<F7>` path: start something, then kill it without naming its id.
+T["send()"]["signals the last task started"] = function()
+  needs_tasksd()
+  use_own_daemon()
+
+  local task_id
+  local messages = with_capture(function(msgs)
+    start_task.start({ working_dir = "/tmp", command = "sleep 60" })
+    wait_for(msgs, 1)
+    task_id = msgs[1].msg:match("as task (%d+)$")
+    eq(task_id ~= nil, true)
+
+    send_signal.impl({ "task_id=last", "signal=KILL" })
+    wait_for(msgs, 3)
+  end)
+
+  local sent = assert(find(messages, ("^sent signal %%d+ to task %s$"):format(task_id)))
+  eq(sent.level, vim.log.levels.INFO)
+  eq(find(messages, ("^task %s was killed by signal %%d+$"):format(task_id)) ~= nil, true)
+
+  client.reset()
+end
+
+-- Reported after connecting, unlike every other argument error here: only a
+-- connection says which daemon `last` is about.
+T["send()"]["says so when nothing has been started here"] = function()
+  needs_tasksd()
+  use_own_daemon()
+
+  local messages = capture(1, function()
+    send_signal.impl({ "task_id=last" })
+  end)
+
+  eq(messages[1].level, vim.log.levels.ERROR)
+  eq(messages[1].msg:match("^no task to signal") ~= nil, true)
 
   client.reset()
 end

@@ -1,11 +1,13 @@
 local arguments = require("tasksd.args")
 local client = require("tasksd.client")
+local last = require("tasksd.last")
 local log = require("tasksd.log")
 local picker = require("tasksd.picker")
 local task = require("tasksd.task")
 local task_picker = require("tasksd.task_picker")
 
----`:Tasksd send_signal [task_id=<id>] [signal=<name|number>]` -- signal a task.
+---`:Tasksd send_signal [task_id=<id|last>] [signal=<name|number>]` -- signal a
+---task.
 ---
 ---With neither argument this asks two questions in pickers: which task, then
 ---which signal. The arguments are `key=value` so that ordering never matters
@@ -13,9 +15,12 @@ local task_picker = require("tasksd.task_picker")
 ---@class tasksd.command.SendSignal : tasksd.Subcommand
 local M = {}
 
-M.desc = "Send a signal to a task: [task_id=<id>] [signal=<name or number>]"
+M.desc = "Send a signal to a task: [task_id=<id or last>] [signal=<name or number>]"
 
 M.DEFAULT_SIGNAL = "TERM"
+
+---The task this Neovim started most recently on the daemon being talked to.
+local LAST = "last"
 
 local KEYS = { "signal=", "task_id=" }
 
@@ -81,8 +86,15 @@ end
 ---@field task_id integer
 ---@field signal integer
 
+---The same request as the arguments asked for it. `last` names a task that only
+---a connection can put a number to, so this is what the pure layer can get to
+---and `M.resolve` is the rest of the way.
+---@class tasksd.command.SignalTarget
+---@field task_id integer|"last"
+---@field signal integer
+
 ---@param args string[]
----@return tasksd.TaskSignalParams|nil params, string|nil err
+---@return tasksd.command.SignalTarget|nil target, string|nil err
 M.params = function(args)
   local values, parse_err = M.parse(args)
   if not values then
@@ -92,13 +104,13 @@ M.params = function(args)
 end
 
 ---@param values table<string, string> As `M.parse` returns them.
----@return tasksd.TaskSignalParams|nil params, string|nil err
+---@return tasksd.command.SignalTarget|nil target, string|nil err
 M.params_from = function(values)
   if not values.task_id then
     return nil, "task_id= is required"
   end
-  if not values.task_id:match("^%d+$") then
-    return nil, ("`%s` is not a task id"):format(values.task_id)
+  if values.task_id ~= LAST and not values.task_id:match("^%d+$") then
+    return nil, ("expected a task id or `%s`, got `%s`"):format(LAST, values.task_id)
   end
 
   local signal, signal_err = M.signal_number(values.signal or M.DEFAULT_SIGNAL)
@@ -106,14 +118,37 @@ M.params_from = function(values)
     return nil, signal_err
   end
 
-  return { task_id = assert(tonumber(values.task_id)), signal = signal }, nil
+  return { task_id = tonumber(values.task_id) or LAST, signal = signal }, nil
 end
 
----@param params tasksd.TaskSignalParams
-M.send = function(params)
+---Put a number to `target`, which is everything `M.params_from` could not do
+---without a connection.
+---@param target tasksd.command.SignalTarget
+---@param c tasksd.Client
+---@return tasksd.TaskSignalParams|nil params, string|nil err
+M.resolve = function(target, c)
+  if target.task_id ~= LAST then
+    return { task_id = target.task_id, signal = target.signal }, nil
+  end
+
+  local _, id = last.for_client(c)
+  if not id then
+    return nil, "no task to signal: nothing has been started on this daemon from here"
+  end
+  return { task_id = id, signal = target.signal }, nil
+end
+
+---@param target tasksd.command.SignalTarget
+M.send = function(target)
   client.get(function(c, connect_err)
     if not c then
       log.error(connect_err or "could not connect to tasksd")
+      return
+    end
+
+    local params, resolve_err = M.resolve(target, c)
+    if not params then
+      log.error(tostring(resolve_err))
       return
     end
 
@@ -233,12 +268,15 @@ end
 ---@param arg_lead string
 ---@return string[]
 M.complete = function(arg_lead)
-  -- Nothing is offered for `task_id=`: completion has to answer synchronously
-  -- and the ids are on the far side of a request. Omitting the argument
-  -- entirely is what opens the task picker.
+  -- `last` is the only candidate for `task_id=`: completion has to answer
+  -- synchronously and the ids themselves are on the far side of a request.
+  -- Omitting the argument entirely is what opens the task picker.
   return arguments.complete(arg_lead, KEYS, {
     signal = function(lead)
       return arguments.starting_with(lead:upper(), M.signal_names())
+    end,
+    task_id = function(lead)
+      return arguments.starting_with(lead, { LAST })
     end,
   })
 end

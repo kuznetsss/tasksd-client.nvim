@@ -131,8 +131,9 @@ Everything is one command with subcommands, and every subcommand completes:
 | ------- | ------- |
 | `:Tasksd start_task` | Open a form and start a task |
 | `:Tasksd output [task_id=<id>] [position=<where>]` | Show or hide a task's output |
+| `:Tasksd repeat[!]` | Start the last task again, unless it is still running |
 | `:Tasksd list_tasks [all\|running\|finished]` | Browse tasks, open the chosen one's output |
-| `:Tasksd send_signal [task_id=<id>] [signal=<name\|number>]` | Signal a task |
+| `:Tasksd send_signal [task_id=<id\|last>] [signal=<name\|number>]` | Signal a task |
 | `:Tasksd send_input [task_id=<id>] [input=<text>]` | Write a line to a task's stdin |
 | `:Tasksd install [auto\|github\|cargo]` | Obtain a tasksd binary |
 | `:Tasksd shutdown` | Stop the daemon |
@@ -198,6 +199,29 @@ that moved between fields is not.
 
 When the task exits you get a notification saying how it ended, whichever
 window you are in.
+
+### Starting the last task again
+
+```vim
+:Tasksd repeat     " start the last task again, unless it is still running
+:Tasksd repeat!    " start it again regardless
+```
+
+The last task is the one this Neovim most recently started on the daemon it is
+talking to. `:Tasksd repeat` asks the daemon for its listing first and refuses
+while that task is still running, which makes a safe one-key rebuild:
+
+```lua
+vim.keymap.set("n", "<F6>", "<Cmd>Tasksd repeat<CR>")
+```
+
+It runs the same argv in the same directory, so a command that needed a shell
+is repeated through one too. Whether the output window opens follows
+`output.show_on_start`, since the daemon does not remember that choice.
+
+With nothing started yet — a fresh Neovim, say — this opens the picker on the
+daemon's finished tasks instead, and starts whichever you choose. That one is
+not guarded: pointing at a task is asking for it.
 
 ### Watching output
 
@@ -276,7 +300,20 @@ An empty result is reported as a message rather than an empty picker, so
 :Tasksd send_signal task_id=3 signal=KILL
 :Tasksd send_signal task_id=3 signal=9
 :Tasksd send_signal signal=INT               " pick which task, send SIGINT
+:Tasksd send_signal task_id=last signal=KILL " the last task started from here
 ```
+
+`task_id=last` is the task this Neovim most recently started on the daemon it
+is talking to, which makes a one-key "stop what I just ran" mapping:
+
+```lua
+vim.keymap.set("n", "<F7>", "<Cmd>Tasksd send_signal task_id=last signal=KILL<CR>")
+```
+
+Each daemon has its own last task, so with the default `daemon.socket =
+"project"` the mapping follows you between projects. It is forgotten when
+Neovim exits, and after the daemon restarts, since task ids only mean anything
+to the daemon that issued them.
 
 Arguments are `key=value` so order never matters and either question can be
 answered in advance. Whichever you leave out becomes a picker.
@@ -536,12 +573,13 @@ Integration tests need a real tasksd binary and skip themselves without one;
 - [x] Highlights
 - [x] Remove references to the local build
 - [x] Auto shell (use `sh -c` if `&&` or any other shell syntax is detected)
-- [ ] Repeatable named tasks
+- [x] Repeat/send signal to the last task
 - [ ] Check available lua api
 - [ ] Documentation
 - [ ] CI
 
-Other features:
+`0.2.0`:
+- [ ] Repeatable named tasks
 - [ ] Output buffer slots
 
 Requires tasksd 0.3.0:

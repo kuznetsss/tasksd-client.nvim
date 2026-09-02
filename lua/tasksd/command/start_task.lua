@@ -1,6 +1,7 @@
 local client = require("tasksd.client")
 local config = require("tasksd.config")
 local form = require("tasksd.form")
+local last = require("tasksd.last")
 local log = require("tasksd.log")
 local output = require("tasksd.output")
 local task = require("tasksd.task")
@@ -74,6 +75,54 @@ M.params = function(values)
   }
 end
 
+---Start `params` on a connection the caller already has, which is how a command
+---that asked the daemon something first goes on to act on the answer without
+---giving up the connection it asked over.
+---@param c tasksd.Client
+---@param params tasksd.TaskStartParams
+M.request = function(c, params)
+  -- Before the request, not after: a task that exits at once can have its
+  -- `task.exit` on the wire before this connection has read the response.
+  task.watch(c, log.notify)
+
+  local sent = c:request("task.start", params, function(rpc_err, result)
+    if rpc_err then
+      log.error(
+        ("could not start `%s`: %s"):format(params.executable, client.describe_error(rpc_err))
+      )
+      return
+    end
+    local task_id = result and result.task_id
+    if not task_id then
+      log.error("tasksd started the task but did not report its id")
+      return
+    end
+    last.record(c, task_id, params)
+    log.info(("started `%s` as task %d"):format(params.executable, task_id))
+
+    if params.subscribe_to_output then
+      -- `attach` rather than `show`: this connection is the one carrying the
+      -- output. Unfocused, because asking to watch a task is not asking to
+      -- stop what you were doing.
+      output.attach(c, task_id, { enter = false })
+    end
+  end)
+  if not sent then
+    log.error("could not send task.start: the connection closed")
+  end
+end
+
+---@param params tasksd.TaskStartParams
+M.send = function(params)
+  client.get(function(c, connect_err)
+    if not c then
+      log.error(connect_err or "could not connect to tasksd")
+      return
+    end
+    M.request(c, params)
+  end)
+end
+
 ---@param values table<string, string|boolean>
 M.start = function(values)
   local params, err = M.params(values)
@@ -81,42 +130,7 @@ M.start = function(values)
     log.error(tostring(err))
     return
   end
-
-  client.get(function(c, connect_err)
-    if not c then
-      log.error(connect_err or "could not connect to tasksd")
-      return
-    end
-
-    -- Before the request, not after: a task that exits at once can have its
-    -- `task.exit` on the wire before this connection has read the response.
-    task.watch(c, log.notify)
-
-    local sent = c:request("task.start", params, function(rpc_err, result)
-      if rpc_err then
-        log.error(
-          ("could not start `%s`: %s"):format(params.executable, client.describe_error(rpc_err))
-        )
-        return
-      end
-      local task_id = result and result.task_id
-      if not task_id then
-        log.error("tasksd started the task but did not report its id")
-        return
-      end
-      log.info(("started `%s` as task %d"):format(params.executable, task_id))
-
-      if params.subscribe_to_output then
-        -- `attach` rather than `show`: this connection is the one carrying the
-        -- output. Unfocused, because asking to watch a task is not asking to
-        -- stop what you were doing.
-        output.attach(c, task_id, { enter = false })
-      end
-    end)
-    if not sent then
-      log.error("could not send task.start: the connection closed")
-    end
-  end)
+  M.send(params)
 end
 
 ---A directory can contain spaces, so the whole field is one candidate.
