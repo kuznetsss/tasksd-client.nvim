@@ -10,12 +10,6 @@ local start_task = require("tasksd.command.start_task")
 
 local TASKSD = os.getenv("TASKSD_BIN")
 
-local function needs_tasksd()
-  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
-  end
-end
-
 local socket_counter = 0
 local sockets = {}
 local function new_socket()
@@ -450,8 +444,6 @@ end
 T["start()"] = new_set()
 
 T["start()"]["reports the id the daemon assigned"] = function()
-  needs_tasksd()
-
   local messages = start_sync({ working_dir = "/tmp", command = "true" }, 1)
 
   eq(messages[1].level, vim.log.levels.INFO)
@@ -459,8 +451,6 @@ T["start()"]["reports the id the daemon assigned"] = function()
 end
 
 T["start()"]["remembers the task it started"] = function()
-  needs_tasksd()
-
   local _, socket = start_sync({ working_dir = "/tmp", command = "true" }, 1)
 
   -- Asked as a later connection to the same socket, which is what a restarted
@@ -477,8 +467,6 @@ T["start()"]["remembers the task it started"] = function()
 end
 
 T["start()"]["remembers nothing when the daemon refused"] = function()
-  needs_tasksd()
-
   local _, socket = start_sync({ working_dir = "/no/such/directory", command = "true" }, 1)
 
   local other = { socket_path = socket }
@@ -487,8 +475,6 @@ T["start()"]["remembers nothing when the daemon refused"] = function()
 end
 
 T["start()"]["reports a rejected request with the daemon's reason"] = function()
-  needs_tasksd()
-
   local messages = start_sync({ working_dir = "/no/such/directory", command = "true" }, 1)
 
   eq(messages[1].level, vim.log.levels.ERROR)
@@ -513,8 +499,6 @@ end
 T["exit"] = new_set()
 
 T["exit"]["reports a task that finished"] = function()
-  needs_tasksd()
-
   local messages = start_sync({ working_dir = "/tmp", command = "true" }, 2)
 
   eq(#messages, 2)
@@ -523,8 +507,6 @@ T["exit"]["reports a task that finished"] = function()
 end
 
 T["exit"]["reports a non-zero exit code"] = function()
-  needs_tasksd()
-
   local messages = start_sync({ working_dir = "/tmp", command = "false" }, 2)
 
   eq(#messages, 2)

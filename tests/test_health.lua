@@ -8,12 +8,6 @@ local install = require("tasksd.install")
 
 local TASKSD = os.getenv("TASKSD_BIN")
 
-local function needs_tasksd()
-  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
-  end
-end
-
 --------------------------------------------------------------------------------
 -- Helpers
 --------------------------------------------------------------------------------
@@ -180,7 +174,6 @@ end
 --------------------------------------------------------------------------------
 
 T["check()"]["accepts a real tasksd"] = function()
-  needs_tasksd()
   config.setup({ daemon = { path = TASKSD } })
   local entries = run_check()
 

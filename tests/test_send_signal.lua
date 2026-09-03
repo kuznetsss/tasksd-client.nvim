@@ -11,12 +11,6 @@ local start_task = require("tasksd.command.start_task")
 
 local TASKSD = os.getenv("TASKSD_BIN")
 
-local function needs_tasksd()
-  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
-  end
-end
-
 local socket_counter = 0
 local sockets = {}
 local function new_socket()
@@ -447,7 +441,6 @@ end
 T["send()"] = new_set()
 
 T["send()"]["signals a running task, which then reports its exit"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local task_id
@@ -473,7 +466,6 @@ end
 
 -- The whole `<F7>` path: start something, then kill it without naming its id.
 T["send()"]["signals the last task started"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local task_id
@@ -497,7 +489,6 @@ end
 -- Reported after connecting, unlike every other argument error here: only a
 -- connection says which daemon `last` is about.
 T["send()"]["says so when nothing has been started here"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local messages = capture(1, function()
@@ -511,7 +502,6 @@ T["send()"]["says so when nothing has been started here"] = function()
 end
 
 T["send()"]["reports a task the daemon does not know"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local messages = capture(1, function()
@@ -531,7 +521,6 @@ end
 T["impl()"] = new_set()
 
 T["impl()"]["asks which task, then which signal, then sends it"] = function()
-  needs_tasksd()
   local specs = use_own_daemon()
 
   local messages = with_capture(function(msgs)
@@ -565,7 +554,6 @@ T["impl()"]["asks which task, then which signal, then sends it"] = function()
 end
 
 T["impl()"]["takes signal= as the second answer in advance"] = function()
-  needs_tasksd()
   local specs = use_own_daemon()
 
   local messages = with_capture(function(msgs)
@@ -588,7 +576,6 @@ T["impl()"]["takes signal= as the second answer in advance"] = function()
 end
 
 T["impl()"]["says so when the daemon has nothing running"] = function()
-  needs_tasksd()
   local specs = use_own_daemon()
 
   local messages = capture(1, function()

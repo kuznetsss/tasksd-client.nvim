@@ -596,8 +596,9 @@ just test    # the mini.test suite
 just nvim    # Neovim with only this plugin on the runtimepath
 ```
 
-Integration tests need a real tasksd binary and skip themselves without one;
-`TASKSD_BIN` points at it.
+The suite needs a real tasksd binary: it uses `TASKSD_BIN` when that is set,
+and otherwise falls back to the one `:Tasksd install` puts in place. If neither
+runs it refuses to start, so a run never quietly skips the integration tests.
 
 ## Roadmap
 
@@ -618,9 +619,9 @@ Integration tests need a real tasksd binary and skip themselves without one;
 - [x] Remove references to the local build
 - [x] Auto shell (use `sh -c` if `&&` or any other shell syntax is detected)
 - [x] Repeat/send signal to the last task
-- [ ] Check available lua api
-- [ ] Documentation
+- [x] Check available lua api
 - [ ] CI
+- [ ] Documentation
 
 `0.2.0`:
 - [ ] Repeatable named tasks

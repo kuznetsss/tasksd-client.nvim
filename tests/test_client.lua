@@ -13,12 +13,6 @@ local TASKSD = os.getenv("TASKSD_BIN")
 -- Helpers
 --------------------------------------------------------------------------------
 
-local function needs_tasksd()
-  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
-  end
-end
-
 ---Run `fn` with both of the fallbacks behind `daemon.path` taken away, so a
 ---case about an unlaunchable daemon fails the same on a machine that has a
 ---tasksd installed or on $PATH as on one that has neither.
@@ -103,7 +97,6 @@ local T = new_set({
 T["connect()"] = new_set()
 
 T["connect()"]["launches the daemon when none is running"] = function()
-  needs_tasksd()
   local socket = new_socket()
 
   local c = connect_ok(socket)
@@ -114,7 +107,6 @@ T["connect()"]["launches the daemon when none is running"] = function()
 end
 
 T["connect()"]["reports the daemon version from the handshake"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
 
   eq(type(c.server_version), "string")
@@ -125,7 +117,6 @@ T["connect()"]["reports the daemon version from the handshake"] = function()
 end
 
 T["connect()"]["refuses a daemon older than the minimum"] = function()
-  needs_tasksd()
   local socket = new_socket()
 
   -- Started while the bar is still normal: `daemon.ensure` pre-flights the
@@ -149,7 +140,6 @@ T["connect()"]["refuses a daemon older than the minimum"] = function()
 end
 
 T["connect()"]["reuses a daemon that is already running"] = function()
-  needs_tasksd()
   local socket = new_socket()
 
   local first = connect_ok(socket)
@@ -162,7 +152,6 @@ T["connect()"]["reuses a daemon that is already running"] = function()
 end
 
 T["connect()"]["recovers from a socket left by a killed daemon"] = function()
-  needs_tasksd()
   local socket = new_socket()
 
   local first = connect_ok(socket)
@@ -213,7 +202,6 @@ local function start_quick_task(c)
 end
 
 T["on()"]["delivers a notification to every listener"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
 
   local seen = {}
@@ -234,7 +222,6 @@ T["on()"]["delivers a notification to every listener"] = function()
 end
 
 T["on()"]["stops delivering to a listener that detached"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
 
   local kept, detached = 0, 0
@@ -259,7 +246,6 @@ end
 -- Detaching mid-dispatch shortens the list the loop is walking, which would
 -- otherwise skip whichever listener slid into the freed slot.
 T["on()"]["runs the listeners behind one that detaches itself"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
 
   local seen = {}
@@ -355,7 +341,6 @@ end
 T["Client"] = new_set()
 
 T["Client"]["stops reporting connected after disconnect"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
 
   eq(c:is_connected(), true)
@@ -364,7 +349,6 @@ T["Client"]["stops reporting connected after disconnect"] = function()
 end
 
 T["Client"]["refuses to send on a closed connection"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
   c:disconnect()
 
@@ -373,7 +357,6 @@ T["Client"]["refuses to send on a closed connection"] = function()
 end
 
 T["Client"]["disconnect is idempotent"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
 
   c:disconnect()
@@ -385,7 +368,6 @@ end
 -- dispatcher; close_reason is what tells them apart afterwards.
 
 T["Client"]["labels a local disconnect"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
   eq(c.close_reason, nil)
 
@@ -395,7 +377,6 @@ T["Client"]["labels a local disconnect"] = function()
 end
 
 T["Client"]["labels a deliberate daemon shutdown"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
 
   c:request("shutdown", {}, function() end)
@@ -412,7 +393,6 @@ T["Client"]["labels a deliberate daemon shutdown"] = function()
 end
 
 T["Client"]["labels a lost connection"] = function()
-  needs_tasksd()
   local socket = new_socket()
   local c = connect_ok(socket)
 
@@ -429,7 +409,6 @@ T["Client"]["labels a lost connection"] = function()
 end
 
 T["Client"]["round-trips a request to the daemon"] = function()
-  needs_tasksd()
   local c = connect_ok(new_socket())
 
   local done, result, err = false, nil, nil
@@ -484,7 +463,6 @@ local function get_ok(socket)
 end
 
 T["get()"]["reuses the same client instead of reconnecting"] = function()
-  needs_tasksd()
   local socket = new_socket()
 
   local first = get_sync(socket)
@@ -494,7 +472,6 @@ T["get()"]["reuses the same client instead of reconnecting"] = function()
 end
 
 T["get()"]["shares one connection attempt between concurrent callers"] = function()
-  needs_tasksd()
   local socket = new_socket()
 
   -- Both calls are made before either can finish, so a naive implementation
@@ -518,7 +495,6 @@ T["get()"]["shares one connection attempt between concurrent callers"] = functio
 end
 
 T["get()"]["reconnects when the cached client has died"] = function()
-  needs_tasksd()
   local socket = new_socket()
 
   local first = get_ok(socket)
@@ -531,7 +507,6 @@ end
 
 -- Nothing calls reset() here: the client has to evict itself.
 T["get()"]["reconnects after the daemon is killed"] = function()
-  needs_tasksd()
   local socket = new_socket()
 
   local first = get_ok(socket)
@@ -550,7 +525,6 @@ end
 
 -- What a per-project socket provider does after :cd.
 T["get()"]["replaces the client when the socket path changes"] = function()
-  needs_tasksd()
   local first = get_ok(new_socket())
   local second = get_ok(new_socket())
 
@@ -570,14 +544,12 @@ T["get()"]["does not cache a failure"] = function()
   eq(first, nil)
   MiniTest.expect.no_equality(err, nil)
 
-  needs_tasksd()
   config.setup({ daemon = { path = TASKSD } })
   local second = get_sync(socket)
   eq(second ~= nil, true)
 end
 
 T["get()"]["always calls back asynchronously, including on a cache hit"] = function()
-  needs_tasksd()
   local socket = new_socket()
   get_sync(socket) -- prime the cache
 
@@ -606,7 +578,6 @@ T["default socket"] = new_set({
 })
 
 T["default socket"]["connects to the socket `daemon.socket` names"] = function()
-  needs_tasksd()
   local socket = new_socket()
   config.setup({
     daemon = {
@@ -633,7 +604,6 @@ end
 -- The resolution happens before the cache is read, so a setting broken
 -- mid-session cannot cost a live connection its subscriptions.
 T["default socket"]["leaves the live client alone when it cannot resolve"] = function()
-  needs_tasksd()
   local live = get_ok(new_socket())
 
   config.setup({ daemon = { socket = "nonsense" } })

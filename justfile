@@ -31,18 +31,12 @@ typecheck:
         --configpath=.luarc.json \
         --logpath={{ build }}/luals
 
-# tests/minimal_init.lua reads MINI_NVIM, so fail here with a fixable message
-# rather than inside Neovim. Leading underscore keeps it out of `just --list`.
-_devshell:
-    @test -n "${MINI_NVIM:-}" \
-      || { echo "MINI_NVIM is unset — enter the devshell (direnv allow / nix develop)"; exit 1; }
-
 # Run the test suite with mini.test
-test *ARGS: _devshell
+test *ARGS:
     nvim --headless -u tests/minimal_init.lua -c 'lua MiniTest.run()' {{ ARGS }}
 
 # Run a single test file, e.g. `just test-file tests/test_health.lua`
-test-file FILE: _devshell
+test-file FILE:
     nvim --headless -u tests/minimal_init.lua -c 'lua MiniTest.run_file("{{ FILE }}")'
 
 # Run every static check

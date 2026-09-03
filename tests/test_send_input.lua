@@ -10,12 +10,6 @@ local start_task = require("tasksd.command.start_task")
 
 local TASKSD = os.getenv("TASKSD_BIN")
 
-local function needs_tasksd()
-  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
-  end
-end
-
 local socket_counter = 0
 local sockets = {}
 local function new_socket()
@@ -277,7 +271,6 @@ end
 T["send()"] = new_set()
 
 T["send()"]["writes to a running task's stdin"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local messages = with_capture(function(msgs)
@@ -297,7 +290,6 @@ T["send()"]["writes to a running task's stdin"] = function()
 end
 
 T["send()"]["reports a task the daemon does not know"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local messages = capture(1, function()
@@ -328,7 +320,6 @@ end
 T["impl()"] = new_set()
 
 T["impl()"]["asks which task, then for the text, then sends it"] = function()
-  needs_tasksd()
   local specs = use_own_daemon()
   local prompts = stub_ui_input("hello")
 
@@ -360,7 +351,6 @@ T["impl()"]["asks which task, then for the text, then sends it"] = function()
 end
 
 T["impl()"]["takes input= as the second answer in advance"] = function()
-  needs_tasksd()
   local specs = use_own_daemon()
   local prompts = stub_ui_input("unused")
 
@@ -394,7 +384,6 @@ T["impl()"]["asks only for the text when task_id= is given"] = function()
 end
 
 T["impl()"]["says so when the daemon has nothing running"] = function()
-  needs_tasksd()
   local specs = use_own_daemon()
 
   local messages = capture(1, function()

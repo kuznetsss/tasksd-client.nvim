@@ -14,4 +14,23 @@ if not mini or mini == "" then
 end
 vim.opt.runtimepath:append(mini)
 
+-- Fail here rather than letting the integration cases skip themselves: a run
+-- that quietly tests nothing still reports green.
+local tasksd = os.getenv("TASKSD_BIN")
+if tasksd == nil or tasksd == "" then
+  -- Only when nothing was asked for: an explicit TASKSD_BIN that will not run
+  -- is an error, not something to silently replace. Published back to the
+  -- environment because the test files resolve the binary by reading it.
+  tasksd = require("tasksd.install").bin_path()
+  vim.env.TASKSD_BIN = tasksd
+end
+
+if vim.fn.executable(tasksd) == 0 then
+  vim.notify(
+    ("no runnable tasksd at %s -- set TASKSD_BIN or run :Tasksd install"):format(tasksd),
+    vim.log.levels.ERROR
+  )
+  vim.cmd("cquit 1")
+end
+
 require("mini.test").setup()

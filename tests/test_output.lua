@@ -13,12 +13,6 @@ local TASKSD = os.getenv("TASKSD_BIN")
 -- Short path on purpose: unix socket paths are capped near 104 bytes.
 local SOCKET = ("/tmp/tasksd-nvim-output-%d.sock"):format(vim.uv.os_getpid())
 
-local function needs_tasksd()
-  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
-  end
-end
-
 ---@return integer|nil
 local function shown()
   local win = window.win()
@@ -96,7 +90,6 @@ end
 local T = new_set({
   hooks = {
     pre_case = function()
-      needs_tasksd()
       config.setup({
         daemon = {
           path = TASKSD,

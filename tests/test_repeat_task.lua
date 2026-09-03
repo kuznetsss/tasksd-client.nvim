@@ -11,12 +11,6 @@ local start_task = require("tasksd.command.start_task")
 
 local TASKSD = os.getenv("TASKSD_BIN")
 
-local function needs_tasksd()
-  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
-  end
-end
-
 local socket_counter = 0
 local sockets = {}
 local function new_socket()
@@ -190,7 +184,6 @@ end
 
 -- The `<F6>` path: the same command runs again, as a task of its own.
 T["impl()"]["starts the last task again once it has finished"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local messages = with_capture(function(msgs)
@@ -214,7 +207,6 @@ T["impl()"]["starts the last task again once it has finished"] = function()
 end
 
 T["impl()"]["refuses while the last task is still running"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local messages = with_capture(function(msgs)
@@ -233,7 +225,6 @@ T["impl()"]["refuses while the last task is still running"] = function()
 end
 
 T["impl()"]["a bang starts another one anyway"] = function()
-  needs_tasksd()
   use_own_daemon()
 
   local messages = with_capture(function(msgs)
@@ -254,7 +245,6 @@ end
 
 -- Nothing has been started from here, so the daemon's memory is what is left.
 T["impl()"]["offers the finished tasks when there is no last task"] = function()
-  needs_tasksd()
   local specs = use_own_daemon()
 
   local chosen_at
@@ -285,7 +275,6 @@ T["impl()"]["offers the finished tasks when there is no last task"] = function()
 end
 
 T["impl()"]["says so when the daemon has nothing to offer either"] = function()
-  needs_tasksd()
   local specs = use_own_daemon()
 
   local messages = with_capture(function(msgs)

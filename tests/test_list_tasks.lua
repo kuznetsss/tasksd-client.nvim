@@ -10,12 +10,6 @@ local start_task = require("tasksd.command.start_task")
 
 local TASKSD = os.getenv("TASKSD_BIN")
 
-local function needs_tasksd()
-  if not TASKSD or vim.fn.executable(TASKSD) == 0 then
-    MiniTest.skip("no tasksd binary; set TASKSD_BIN=/path/to/tasksd")
-  end
-end
-
 local socket_counter = 0
 local sockets = {}
 local function new_socket()
@@ -189,7 +183,6 @@ end
 --------------------------------------------------------------------------------
 
 T["impl()"]["shows a task the daemon is running"] = function()
-  needs_tasksd()
   local opened = use_own_daemon()
 
   with_capture(function(messages)
@@ -217,7 +210,6 @@ T["impl()"]["shows a task the daemon is running"] = function()
 end
 
 T["impl()"]["says so when nothing matches the filter"] = function()
-  needs_tasksd()
   local opened = use_own_daemon()
 
   local messages = with_capture(function(msgs)
