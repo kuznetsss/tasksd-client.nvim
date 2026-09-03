@@ -1,9 +1,11 @@
+local arguments = require("tasksd.args")
 local client = require("tasksd.client")
 local log = require("tasksd.log")
 local task = require("tasksd.task")
 local task_picker = require("tasksd.task_picker")
 
----`:Tasksd send_input [task_id=<id>] [input=<text>]` -- write to a task's stdin.
+---`:Tasksd send_input [task_id=<id>] [input=<text>]`, or
+---`require("tasksd").send_input(opts)` -- write to a task's stdin.
 ---
 ---Whichever argument is missing becomes a question: a picker of running tasks,
 ---then `vim.ui.input` for the text.
@@ -14,38 +16,41 @@ M.desc = "Send input to a task's stdin: [task_id=<id>] [input=<text>]"
 
 local KEYS = { "input=", "task_id=" }
 
+---@class tasksd.command.send_input.Opts
+---@field task_id? integer The task to write to; without one, a picker asks.
+---@field input? string The text to write; without it, `vim.ui.input` asks.
+
 ---@param args string[]
----@return table<string, string>|nil values, string|nil err
-M.parse = function(args)
-  local values = {}
-  for i, arg in ipairs(args) do
-    local key, value = arg:match("^([%w_]+)=(.*)$")
-    if not key then
-      return nil, ("expected key=value, got `%s`"):format(arg)
-    end
-    if not vim.tbl_contains(KEYS, key .. "=") then
-      return nil,
-        ("unknown argument `%s`, expected one of: %s"):format(key, table.concat(KEYS, ", "))
-    end
-    -- The command line arrives already split on whitespace, so `input=` takes
-    -- everything after it or it could never carry a space. Runs of whitespace
-    -- collapse to one; anything more exact belongs in the `vim.ui.input` prompt.
-    if key == "input" then
-      values.input = table.concat(vim.list_extend({ value }, vim.list_slice(args, i + 1)), " ")
-      break
-    end
-    values[key] = value
+---@return tasksd.command.send_input.Opts|nil opts, string|nil err
+M.from_argv = function(args)
+  local values, err = arguments.parse(args, KEYS, "input")
+  if not values then
+    return nil, err
   end
-  return values, nil
+
+  local task_id
+  if values.task_id then
+    if not values.task_id:match("^%d+$") then
+      return nil, ("`%s` is not a task id"):format(values.task_id)
+    end
+    task_id = tonumber(values.task_id)
+  end
+
+  ---@type tasksd.command.send_input.Opts
+  local opts = { task_id = task_id, input = values.input }
+  return opts, nil
 end
 
----@param spec string
----@return integer|nil task_id, string|nil err
-M.task_id = function(spec)
-  if not spec:match("^%d+$") then
-    return nil, ("`%s` is not a task id"):format(spec)
+---@param opts tasksd.command.send_input.Opts
+---@return string|nil err
+M.validate = function(opts)
+  if opts.task_id ~= nil and (type(opts.task_id) ~= "number" or opts.task_id < 0) then
+    return ("`%s` is not a task id"):format(tostring(opts.task_id))
   end
-  return assert(tonumber(spec)), nil
+  if opts.input ~= nil and type(opts.input) ~= "string" then
+    return ("expected input to be a string, got %s"):format(type(opts.input))
+  end
+  return nil
 end
 
 ---The daemon writes the bytes verbatim, and a task reading a line stays blocked
@@ -64,32 +69,6 @@ end
 ---@class tasksd.TaskInputParams
 ---@field task_id integer
 ---@field input string
-
----@param args string[]
----@return tasksd.TaskInputParams|nil params, string|nil err
-M.params = function(args)
-  local values, parse_err = M.parse(args)
-  if not values then
-    return nil, parse_err
-  end
-  return M.params_from(values)
-end
-
----@param values table<string, string> As `M.parse` returns them.
----@return tasksd.TaskInputParams|nil params, string|nil err
-M.params_from = function(values)
-  if not values.task_id then
-    return nil, "task_id= is required"
-  end
-  local task_id, id_err = M.task_id(values.task_id)
-  if not task_id then
-    return nil, id_err
-  end
-  if not values.input then
-    return nil, "input= is required"
-  end
-  return { task_id = task_id, input = M.line(values.input) }, nil
-end
 
 ---@param params tasksd.TaskInputParams
 M.send = function(params)
@@ -153,34 +132,42 @@ M.choose_task = function(on_choice)
   })
 end
 
-M.impl = function(args)
-  local values, parse_err = M.parse(args)
-  if not values then
-    log.error(tostring(parse_err))
+---@param opts tasksd.command.send_input.Opts|nil
+M.run = function(opts)
+  vim.validate("opts", opts, "table", true)
+  opts = opts or {}
+
+  local err = M.validate(opts)
+  if err then
+    log.error(err)
     return
   end
 
-  if values.task_id then
-    local task_id, id_err = M.task_id(values.task_id)
-    if not task_id then
-      log.error(tostring(id_err))
-      return
-    end
-    if values.input then
-      M.send({ task_id = task_id, input = M.line(values.input) })
+  if opts.task_id then
+    if opts.input then
+      M.send({ task_id = opts.task_id, input = M.line(opts.input) })
     else
-      M.ask(task_id)
+      M.ask(opts.task_id)
     end
     return
   end
 
   M.choose_task(function(entry)
-    if values.input then
-      M.send({ task_id = entry.id, input = M.line(values.input) })
+    if opts.input then
+      M.send({ task_id = entry.id, input = M.line(opts.input) })
       return
     end
     M.ask(entry.id, task.command_line(entry.info))
   end)
+end
+
+M.impl = function(args)
+  local opts, err = M.from_argv(args)
+  if not opts then
+    log.error(tostring(err))
+    return
+  end
+  M.run(opts)
 end
 
 ---@param arg_lead string
@@ -188,12 +175,7 @@ end
 M.complete = function(arg_lead)
   -- Neither value has candidates: the ids are on the far side of a request and
   -- completion has to answer synchronously, and the input is free text.
-  if arg_lead:match("^([%w_]+)=") then
-    return {}
-  end
-  return vim.tbl_filter(function(name)
-    return vim.startswith(name, arg_lead)
-  end, KEYS)
+  return arguments.complete(arg_lead, KEYS, {})
 end
 
 return M

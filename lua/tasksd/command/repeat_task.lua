@@ -6,15 +6,19 @@ local start_task = require("tasksd.command.start_task")
 local task = require("tasksd.task")
 local task_picker = require("tasksd.task_picker")
 
----`:Tasksd repeat[!]` -- start the last task again.
+---`:Tasksd[!] repeat_task`, or `require("tasksd").repeat_task(opts)` -- start
+---the last task again.
 ---
 ---The daemon is asked for its listing first, and a task still running is not
----started a second time; `!` skips that check. Choosing one out of the picker
----is not checked either: pointing at a task is asking for it.
----@class tasksd.command.Repeat : tasksd.Subcommand
+---started a second time; `force` skips that check. Choosing one out of the
+---picker is not checked either: pointing at a task is asking for it.
+---@class tasksd.command.RepeatTask : tasksd.Subcommand
 local M = {}
 
 M.desc = "Start the last task again: ! to start it even while it is running"
+
+---@class tasksd.command.repeat_task.Opts
+---@field force? boolean Start it again even while it is still running.
 
 M.PICKER_TITLE = "Choose a task to start again"
 
@@ -57,7 +61,7 @@ M.guarded = function(c, id, params)
       return
     end
     if M.is_running(result, id) then
-      log.warn(("task %d is still running; `:Tasksd repeat!` starts another"):format(id))
+      log.warn(("task %d is still running; `:Tasksd! repeat_task` starts another"):format(id))
       return
     end
     start_task.request(c, params)
@@ -81,7 +85,11 @@ M.choose = function()
   })
 end
 
-M.impl = function(_args, bang)
+---@param opts tasksd.command.repeat_task.Opts|nil
+M.run = function(opts)
+  vim.validate("opts", opts, "table", true)
+  local force = opts and opts.force
+
   client.get(function(c, connect_err)
     if not c then
       log.error(connect_err or "could not connect to tasksd")
@@ -96,12 +104,20 @@ M.impl = function(_args, bang)
 
     -- No id means a connection that is not the one the task was started on, so
     -- there is nothing here the id could still be running as.
-    if bang or not id then
+    if force or not id then
       start_task.request(c, params)
       return
     end
     M.guarded(c, id, params)
   end)
+end
+
+M.impl = function(args, bang)
+  if #args > 0 then
+    log.error(("repeat_task takes no arguments, got `%s`"):format(table.concat(args, " ")))
+    return
+  end
+  M.run({ force = bang or nil })
 end
 
 return M

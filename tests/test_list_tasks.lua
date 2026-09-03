@@ -85,31 +85,48 @@ local T = new_set({
 })
 
 --------------------------------------------------------------------------------
--- parse
+-- arguments
 --------------------------------------------------------------------------------
 
-T["parse()"] = new_set()
+T["from_argv()"] = new_set()
 
-T["parse()"]["defaults to all"] = function()
-  eq(list_tasks.parse({}), "all")
+T["from_argv()"]["takes no filter at all"] = function()
+  eq(list_tasks.from_argv({}), {})
 end
 
-T["parse()"]["takes a state as the filter"] = function()
-  eq(list_tasks.parse({ "running" }), "running")
-  eq(list_tasks.parse({ "finished" }), "finished")
+T["from_argv()"]["reads a filter"] = function()
+  eq(list_tasks.from_argv({ "filter=running" }), { filter = "running" })
 end
 
-T["parse()"]["rejects a filter that is not a state"] = function()
-  local filter, err = list_tasks.parse({ "sleeping" })
+T["from_argv()"]["rejects a bare filter"] = function()
+  local opts, err = list_tasks.from_argv({ "running" })
+  eq(opts, nil)
+  eq(tostring(err):match("^expected key=value") ~= nil, true)
+end
+
+T["from_argv()"]["rejects an unknown key"] = function()
+  local opts, err = list_tasks.from_argv({ "state=running" })
+  eq(opts, nil)
+  eq(tostring(err):match("^unknown argument `state`") ~= nil, true)
+end
+
+T["validate()"] = new_set()
+
+T["validate()"]["defaults to all"] = function()
+  eq(list_tasks.validate({}), "all")
+end
+
+T["validate()"]["takes a state as the filter"] = function()
+  eq(list_tasks.validate({ filter = "running" }), "running")
+  eq(list_tasks.validate({ filter = "finished" }), "finished")
+end
+
+T["validate()"]["rejects a filter that is not a state"] = function()
+  ---@diagnostic disable-next-line: assign-type-mismatch
+  local filter, err = list_tasks.validate({ filter = "sleeping" })
   eq(filter, nil)
   eq(tostring(err):match("^unknown filter `sleeping`") ~= nil, true)
   eq(tostring(err):match("all, finished, running$") ~= nil, true)
-end
-
-T["parse()"]["rejects more than one filter"] = function()
-  local filter, err = list_tasks.parse({ "running", "finished" })
-  eq(filter, nil)
-  eq(err, "expected at most one filter, got 2 arguments")
 end
 
 --------------------------------------------------------------------------------
@@ -136,16 +153,20 @@ end
 
 T["complete()"] = new_set()
 
-T["complete()"]["offers the filters"] = function()
-  eq(list_tasks.complete(""), { "all", "finished", "running" })
+T["complete()"]["offers the key"] = function()
+  eq(list_tasks.complete(""), { "filter=" })
+end
+
+T["complete()"]["offers the filters once the key is typed"] = function()
+  eq(list_tasks.complete("filter="), { "filter=all", "filter=finished", "filter=running" })
 end
 
 T["complete()"]["filters them by prefix"] = function()
-  eq(list_tasks.complete("f"), { "finished" })
+  eq(list_tasks.complete("filter=f"), { "filter=finished" })
 end
 
 T["complete()"]["is reachable from the command line"] = function()
-  eq(vim.fn.getcompletion("Tasksd list_tasks ", "cmdline"), { "all", "finished", "running" })
+  eq(vim.fn.getcompletion("Tasksd list_tasks ", "cmdline"), { "filter=" })
 end
 
 --------------------------------------------------------------------------------
@@ -156,7 +177,7 @@ T["impl()"] = new_set()
 
 T["impl()"]["reports a bad filter without connecting"] = function()
   local messages = with_capture(function()
-    list_tasks.impl({ "sleeping" })
+    list_tasks.impl({ "filter=sleeping" })
   end)
 
   eq(messages[1].level, vim.log.levels.ERROR)
@@ -172,14 +193,14 @@ T["impl()"]["shows a task the daemon is running"] = function()
   local opened = use_own_daemon()
 
   with_capture(function(messages)
-    start_task.start({ working_dir = "/tmp", command = "sleep 60" })
+    start_task.start({ working_dir = "/tmp", command = "sleep 60", show_output = false })
     vim.wait(15000, function()
       return #messages >= 1
     end, 20)
     local task_id = messages[1].msg:match("as task (%d+)$")
     eq(task_id ~= nil, true)
 
-    list_tasks.impl({ "running" })
+    list_tasks.impl({ "filter=running" })
     vim.wait(15000, function()
       return opened() ~= nil
     end, 20)
@@ -200,7 +221,7 @@ T["impl()"]["says so when nothing matches the filter"] = function()
   local opened = use_own_daemon()
 
   local messages = with_capture(function(msgs)
-    list_tasks.impl({ "finished" })
+    list_tasks.impl({ "filter=finished" })
     vim.wait(15000, function()
       return #msgs >= 1
     end, 20)

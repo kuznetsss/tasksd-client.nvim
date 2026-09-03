@@ -169,56 +169,124 @@ T["signal_number()"]["rejects zero"] = function()
 end
 
 --------------------------------------------------------------------------------
--- params
+-- arguments
 --------------------------------------------------------------------------------
 
-T["params()"] = new_set()
+T["from_argv()"] = new_set()
 
-T["params()"]["builds the request from key=value arguments"] = function()
-  eq(send_signal.params({ "task_id=3", "signal=9" }), { task_id = 3, signal = 9 })
+T["from_argv()"]["reads both keys"] = function()
+  eq(send_signal.from_argv({ "task_id=3", "signal=9" }), { task_id = 3, signal = "9" })
 end
 
-T["params()"]["does not care about argument order"] = function()
-  eq(send_signal.params({ "signal=9", "task_id=3" }), { task_id = 3, signal = 9 })
-end
-
-T["params()"]["defaults to TERM"] = function()
-  local params = assert(send_signal.params({ "task_id=3" }))
-  eq(params.signal, vim.uv.constants.SIGTERM)
-end
-
-T["params()"]["requires a task id"] = function()
-  local params, err = send_signal.params({ "signal=9" })
-  eq(params, nil)
-  eq(err, "task_id= is required")
-end
-
-T["params()"]["rejects a task id that is not a number"] = function()
-  local params, err = send_signal.params({ "task_id=abc" })
-  eq(params, nil)
-  eq(err, "expected a task id or `last`, got `abc`")
+T["from_argv()"]["does not care about argument order"] = function()
+  eq(
+    send_signal.from_argv({ "signal=9", "task_id=3" }),
+    send_signal.from_argv({ "task_id=3", "signal=9" })
+  )
 end
 
 -- Carried through as it stands: only a connection can put a number to it.
-T["params()"]["takes `last` in place of an id"] = function()
-  eq(send_signal.params({ "task_id=last", "signal=9" }), { task_id = "last", signal = 9 })
+T["from_argv()"]["takes `last` in place of an id"] = function()
+  eq(send_signal.from_argv({ "task_id=last" }).task_id, "last")
 end
 
-T["params()"]["defaults to TERM for `last` too"] = function()
-  local params = assert(send_signal.params({ "task_id=last" }))
-  eq(params.signal, vim.uv.constants.SIGTERM)
+T["from_argv()"]["rejects a task id that is not a number"] = function()
+  local opts, err = send_signal.from_argv({ "task_id=abc" })
+  eq(opts, nil)
+  eq(err, "expected a task id or `last`, got `abc`")
 end
 
-T["params()"]["rejects a bare word"] = function()
-  local params, err = send_signal.params({ "3" })
-  eq(params, nil)
+T["from_argv()"]["rejects a bare word"] = function()
+  local opts, err = send_signal.from_argv({ "3" })
+  eq(opts, nil)
   eq(err, "expected key=value, got `3`")
 end
 
-T["params()"]["rejects an unknown key"] = function()
-  local params, err = send_signal.params({ "task=3" })
-  eq(params, nil)
+T["from_argv()"]["rejects an unknown key"] = function()
+  local opts, err = send_signal.from_argv({ "task=3" })
+  eq(opts, nil)
   eq(tostring(err):match("^unknown argument `task`") ~= nil, true)
+end
+
+T["validate()"] = new_set()
+
+T["validate()"]["turns a signal name into a number"] = function()
+  eq(send_signal.validate({ task_id = 3, signal = "KILL" }), {
+    task_id = 3,
+    signal = vim.uv.constants.SIGKILL,
+  })
+end
+
+T["validate()"]["takes a signal number as it stands"] = function()
+  eq(send_signal.validate({ task_id = 3, signal = 9 }), { task_id = 3, signal = 9 })
+end
+
+-- Left unanswered rather than defaulted: without a task id the picker asks for
+-- the signal too, and only the other path falls back to TERM.
+T["validate()"]["leaves a missing signal alone"] = function()
+  eq(send_signal.validate({ task_id = 3 }), { task_id = 3 })
+end
+
+T["validate()"]["carries `last` through"] = function()
+  eq(send_signal.validate({ task_id = "last", signal = 9 }), { task_id = "last", signal = 9 })
+end
+
+T["validate()"]["rejects a task id that is neither a number nor `last`"] = function()
+  ---@diagnostic disable-next-line: assign-type-mismatch
+  local target, err = send_signal.validate({ task_id = "3" })
+  eq(target, nil)
+  eq(err, "expected a task id or `last`, got `3`")
+end
+
+T["validate()"]["rejects an unknown signal"] = function()
+  local target, err = send_signal.validate({ task_id = 3, signal = "BOGUS" })
+  eq(target, nil)
+  eq(tostring(err):match("^unknown signal `BOGUS`") ~= nil, true)
+end
+
+T["run()"] = new_set()
+
+---Run `fn` with `send` replaced by a recorder, so nothing here reaches a daemon.
+---@param fn fun(sent: tasksd.command.SignalTarget[])
+local function with_stubbed_send(fn)
+  local original = send_signal.send
+  local sent = {}
+
+  ---@diagnostic disable-next-line: duplicate-set-field
+  send_signal.send = function(target)
+    table.insert(sent, target)
+  end
+
+  local ok, err = pcall(fn, sent)
+
+  send_signal.send = original
+  if not ok then
+    error(err, 0)
+  end
+end
+
+T["run()"]["defaults to TERM"] = function()
+  with_stubbed_send(function(sent)
+    send_signal.run({ task_id = 3 })
+    eq(sent, { { task_id = 3, signal = vim.uv.constants.SIGTERM } })
+  end)
+end
+
+T["run()"]["defaults to TERM for `last` too"] = function()
+  with_stubbed_send(function(sent)
+    send_signal.run({ task_id = "last" })
+    eq(sent, { { task_id = "last", signal = vim.uv.constants.SIGTERM } })
+  end)
+end
+
+-- The command line and the Lua call are the same request written two ways.
+T["run()"]["matches the command line"] = function()
+  with_stubbed_send(function(sent)
+    vim.cmd("Tasksd send_signal task_id=3 signal=KILL")
+    send_signal.run({ task_id = 3, signal = "KILL" })
+    eq(#sent, 2)
+    eq(sent[1], sent[2])
+  end)
 end
 
 --------------------------------------------------------------------------------
@@ -384,7 +452,7 @@ T["send()"]["signals a running task, which then reports its exit"] = function()
 
   local task_id
   local messages = with_capture(function(msgs)
-    start_task.start({ working_dir = "/tmp", command = "sleep 60" })
+    start_task.start({ working_dir = "/tmp", command = "sleep 60", show_output = false })
     wait_for(msgs, 1)
     task_id = msgs[1].msg:match("as task (%d+)$")
     eq(task_id ~= nil, true)
@@ -410,7 +478,7 @@ T["send()"]["signals the last task started"] = function()
 
   local task_id
   local messages = with_capture(function(msgs)
-    start_task.start({ working_dir = "/tmp", command = "sleep 60" })
+    start_task.start({ working_dir = "/tmp", command = "sleep 60", show_output = false })
     wait_for(msgs, 1)
     task_id = msgs[1].msg:match("as task (%d+)$")
     eq(task_id ~= nil, true)
@@ -467,7 +535,7 @@ T["impl()"]["asks which task, then which signal, then sends it"] = function()
   local specs = use_own_daemon()
 
   local messages = with_capture(function(msgs)
-    start_task.start({ working_dir = "/tmp", command = "sleep 60" })
+    start_task.start({ working_dir = "/tmp", command = "sleep 60", show_output = false })
     wait_for(msgs, 1)
     local task_id = assert(tonumber(msgs[1].msg:match("as task (%d+)$")))
 
@@ -501,7 +569,7 @@ T["impl()"]["takes signal= as the second answer in advance"] = function()
   local specs = use_own_daemon()
 
   local messages = with_capture(function(msgs)
-    start_task.start({ working_dir = "/tmp", command = "sleep 60" })
+    start_task.start({ working_dir = "/tmp", command = "sleep 60", show_output = false })
     wait_for(msgs, 1)
 
     send_signal.impl({ "signal=KILL" })

@@ -109,8 +109,12 @@ T["completion"]["filters by prefix"] = function()
   eq(vim.fn.getcompletion("Tasksd sh", "cmdline"), { "shutdown" })
 end
 
-T["completion"]["offers nothing once a subcommand is settled"] = function()
-  eq(vim.fn.getcompletion("Tasksd start_task ", "cmdline"), {})
+T["completion"]["offers a settled subcommand's own arguments"] = function()
+  eq(vim.fn.getcompletion("Tasksd list_tasks ", "cmdline"), { "filter=" })
+end
+
+T["completion"]["offers nothing for a subcommand that takes none"] = function()
+  eq(vim.fn.getcompletion("Tasksd shutdown ", "cmdline"), {})
 end
 
 T["dispatch"] = new_set()
@@ -139,22 +143,73 @@ T["dispatch"]["forwards the remaining arguments"] = function()
   eq(got, { "foo", "bar" })
 end
 
+T["lua api"] = new_set()
+
+-- Every subcommand is reachable from Lua under its own name, so the two
+-- surfaces cannot drift apart without this failing.
+T["lua api"]["has a function per subcommand"] = function()
+  local tasksd = require("tasksd")
+  for _, name in ipairs(command.names()) do
+    eq({ name, type(tasksd[name]) }, { name, "function" })
+  end
+end
+
+T["lua api"]["exposes nothing the command line does not"] = function()
+  local known = vim.list_extend({ "setup" }, command.names())
+  for name in pairs(require("tasksd")) do
+    eq({ name, vim.tbl_contains(known, name) }, { name, true })
+  end
+end
+
+T["aliases"] = new_set()
+
+-- `repeat` cannot be the Lua name, so the command line keeps it as an alias for
+-- command lines that were already written.
+T["aliases"]["dispatches `repeat` to repeat_task"] = function()
+  local original = command.subcommands.repeat_task.impl
+  local ran = false
+  command.subcommands.repeat_task.impl = function()
+    ran = true
+  end
+
+  local ok, err = pcall(function()
+    vim.cmd("Tasksd repeat")
+  end)
+
+  command.subcommands.repeat_task.impl = original
+  assert(ok, err)
+  eq(ran, true)
+end
+
+T["aliases"]["are not offered in completion"] = function()
+  eq(vim.tbl_contains(vim.fn.getcompletion("Tasksd ", "cmdline"), "repeat"), false)
+end
+
 T["install"] = new_set()
+
+T["install"]["completes its key"] = function()
+  eq(vim.fn.getcompletion("Tasksd install ", "cmdline"), { "method=" })
+end
 
 -- Against install.method_names() rather than a hardcoded list, so adding a
 -- method does not mean editing this case.
 T["install"]["completes the install methods"] = function()
-  eq(vim.fn.getcompletion("Tasksd install ", "cmdline"), install.method_names())
+  eq(
+    vim.fn.getcompletion("Tasksd install method=", "cmdline"),
+    vim.tbl_map(function(name)
+      return "method=" .. name
+    end, install.method_names())
+  )
 end
 
 T["install"]["filters methods by prefix"] = function()
-  eq(vim.fn.getcompletion("Tasksd install g", "cmdline"), { "github" })
+  eq(vim.fn.getcompletion("Tasksd install method=g", "cmdline"), { "method=github" })
 end
 
 T["install"]["passes the method through"] = function()
   with_stubbed_run(function(calls)
     with_notify(function()
-      vim.cmd("Tasksd install github")
+      vim.cmd("Tasksd install method=github")
       calls[1].done(true, nil)
     end)
     eq(#calls, 1)
@@ -167,7 +222,7 @@ end
 T["install"]["hands an unknown method to install.run"] = function()
   with_stubbed_run(function(calls)
     with_notify(function()
-      vim.cmd("Tasksd install bogus")
+      vim.cmd("Tasksd install method=bogus")
       calls[1].done(false, "unknown install method `bogus`")
     end)
     eq(calls[1].name, "bogus")
@@ -234,7 +289,7 @@ T["install"]["installs anyway when banged"] = function()
   end, function()
     with_usable("0.2.0", "installed", function()
       with_notify(function()
-        vim.cmd("Tasksd! install cargo")
+        vim.cmd("Tasksd! install method=cargo")
         eq(#calls, 1)
         eq(calls[1].name, "cargo")
         calls[1].done(true, nil)
@@ -246,7 +301,7 @@ end
 T["install"]["announces the method before it starts"] = function()
   with_stubbed_run(function(calls)
     with_notify(function(messages)
-      vim.cmd("Tasksd install cargo")
+      vim.cmd("Tasksd install method=cargo")
       eq(#messages, 1)
       eq(messages[1]:find("cargo", 1, true) ~= nil, true)
       calls[1].done(true, nil)
@@ -257,7 +312,7 @@ end
 T["install"]["reports where it installed to"] = function()
   with_stubbed_run(function(calls)
     with_notify(function(messages)
-      vim.cmd("Tasksd install cargo")
+      vim.cmd("Tasksd install method=cargo")
       calls[1].done(true, nil)
       eq(messages[#messages]:find(install.bin_path(), 1, true) ~= nil, true)
     end)
@@ -269,7 +324,7 @@ end
 T["install"]["shows progress while an install is running"] = function()
   with_stubbed_run(function(calls)
     with_notify(function(messages)
-      vim.cmd("Tasksd install auto")
+      vim.cmd("Tasksd install method=auto")
       calls[1].report("trying `github`")
       eq(messages[#messages]:find("trying `github`", 1, true) ~= nil, true)
       calls[1].done(true, nil)
@@ -280,7 +335,7 @@ end
 T["install"]["reports the failure a method returned"] = function()
   with_stubbed_run(function(calls)
     with_notify(function(messages)
-      vim.cmd("Tasksd install cargo")
+      vim.cmd("Tasksd install method=cargo")
       calls[1].done(false, "cargo is not on $PATH")
       eq(messages[#messages]:find("cargo is not on $PATH", 1, true) ~= nil, true)
     end)
@@ -292,8 +347,8 @@ end
 T["install"]["refuses a second install while one is running"] = function()
   with_stubbed_run(function(calls)
     with_notify(function(messages)
-      vim.cmd("Tasksd install cargo")
-      vim.cmd("Tasksd install github")
+      vim.cmd("Tasksd install method=cargo")
+      vim.cmd("Tasksd install method=github")
       eq(#calls, 1)
       eq(messages[#messages]:find("already running", 1, true) ~= nil, true)
 
@@ -306,9 +361,9 @@ end
 T["install"]["accepts another install once the first finished"] = function()
   with_stubbed_run(function(calls)
     with_notify(function()
-      vim.cmd("Tasksd install cargo")
+      vim.cmd("Tasksd install method=cargo")
       calls[1].done(false, "boom")
-      vim.cmd("Tasksd install github")
+      vim.cmd("Tasksd install method=github")
       eq(#calls, 2)
       calls[2].done(true, nil)
     end)

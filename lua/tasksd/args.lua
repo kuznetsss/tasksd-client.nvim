@@ -6,10 +6,11 @@ local M = {}
 
 ---@param argv string[] The subcommand's own arguments, without its name.
 ---@param keys string[] Accepted keys, each written with its `=`, sorted.
+---@param greedy? string A key that takes the rest of the line, so its value can hold spaces.
 ---@return table<string, string>|nil values, string|nil err
-M.parse = function(argv, keys)
+M.parse = function(argv, keys, greedy)
   local values = {}
-  for _, arg in ipairs(argv) do
+  for i, arg in ipairs(argv) do
     local key, value = arg:match("^([%w_]+)=(.*)$")
     if not key then
       return nil, ("expected key=value, got `%s`"):format(arg)
@@ -18,9 +19,31 @@ M.parse = function(argv, keys)
       return nil,
         ("unknown argument `%s`, expected one of: %s"):format(key, table.concat(keys, ", "))
     end
+    -- The command line arrives already split on whitespace, so a greedy key
+    -- takes everything after it or it could never carry a space. Runs of
+    -- whitespace collapse to one; anything more exact belongs in Lua.
+    if key == greedy then
+      values[key] = table.concat(vim.list_extend({ value }, vim.list_slice(argv, i + 1)), " ")
+      break
+    end
     values[key] = value
   end
   return values, nil
+end
+
+---@type string[]
+M.BOOLEANS = { "false", "true" }
+
+---@param value string
+---@return boolean|nil, string|nil err
+M.boolean = function(value)
+  if value == "true" then
+    return true, nil
+  end
+  if value == "false" then
+    return false, nil
+  end
+  return nil, ("expected true or false, got `%s`"):format(value)
 end
 
 ---The keys until one has been typed, then that key's own candidates.

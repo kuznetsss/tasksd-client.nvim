@@ -87,7 +87,7 @@ This obtains the exact tasksd release this client is pinned to (see
 `stdpath("data")/tasksd/bin/tasksd` — deliberately outside the plugin
 directory, so updating the plugin does not wipe it.
 
-Three methods are available, and `:Tasksd install <method>` picks one
+Three methods are available, and `:Tasksd install method=<name>` picks one
 explicitly:
 
 | Method   | What it does | Needs |
@@ -127,16 +127,43 @@ Everything is one command with subcommands, and every subcommand completes:
 :Tasksd <Tab>
 ```
 
-| Command | Purpose |
-| ------- | ------- |
-| `:Tasksd start_task` | Open a form and start a task |
-| `:Tasksd output [task_id=<id>] [position=<where>]` | Show or hide a task's output |
-| `:Tasksd repeat[!]` | Start the last task again, unless it is still running |
-| `:Tasksd list_tasks [all\|running\|finished]` | Browse tasks, open the chosen one's output |
-| `:Tasksd send_signal [task_id=<id\|last>] [signal=<name\|number>]` | Signal a task |
-| `:Tasksd send_input [task_id=<id>] [input=<text>]` | Write a line to a task's stdin |
-| `:Tasksd install [auto\|github\|cargo]` | Obtain a tasksd binary |
-| `:Tasksd shutdown` | Stop the daemon |
+| Command | Lua | Purpose |
+| ------- | --- | ------- |
+| `:Tasksd start_task [command=<argv>]` | `start_task(opts)` | Start a task, or open a form to describe one |
+| `:Tasksd[!] output [task_id=<id>] [position=<where>]` | `output(opts)` | Show or hide a task's output |
+| `:Tasksd[!] repeat_task` | `repeat_task(opts)` | Start the last task again, unless it is still running |
+| `:Tasksd list_tasks [filter=<all\|running\|finished>]` | `list_tasks(opts)` | Browse tasks, open the chosen one's output |
+| `:Tasksd send_signal [task_id=<id\|last>] [signal=<name\|number>]` | `send_signal(opts)` | Signal a task |
+| `:Tasksd send_input [task_id=<id>] [input=<text>]` | `send_input(opts)` | Write a line to a task's stdin |
+| `:Tasksd[!] install [method=<auto\|github\|cargo>]` | `install(opts)` | Obtain a tasksd binary |
+| `:Tasksd shutdown` | `shutdown()` | Stop the daemon |
+
+### The Lua API
+
+Every subcommand is also a function on `require("tasksd")`, taking the same
+arguments as a table. Each `key=value` is a table key, and the bang is `force`:
+
+```lua
+local tasksd = require("tasksd")
+
+tasksd.start_task({ command = "cargo test", show_output = true })
+tasksd.output({ task_id = 3, position = "right", force = true })
+tasksd.send_signal({ task_id = "last", signal = "KILL" })
+tasksd.repeat_task({ force = true })
+```
+
+Which is the same as:
+
+```vim
+:Tasksd start_task show_output=true command=cargo test
+:Tasksd! output task_id=3 position=right
+:Tasksd send_signal task_id=last signal=KILL
+:Tasksd! repeat_task
+```
+
+Calling one with no arguments asks for whatever it needs, exactly as the bare
+command does: `tasksd.start_task()` opens the form, `tasksd.send_signal()`
+opens the task picker.
 
 You never have to start the daemon yourself. The first subcommand that needs it
 probes the socket, launches tasksd if nothing answers, waits for it to bind,
@@ -203,16 +230,16 @@ window you are in.
 ### Starting the last task again
 
 ```vim
-:Tasksd repeat     " start the last task again, unless it is still running
-:Tasksd repeat!    " start it again regardless
+:Tasksd repeat_task     " start the last task again, unless it is still running
+:Tasksd! repeat_task    " start it again regardless
 ```
 
 The last task is the one this Neovim most recently started on the daemon it is
-talking to. `:Tasksd repeat` asks the daemon for its listing first and refuses
+talking to. `:Tasksd repeat_task` asks the daemon for its listing first and refuses
 while that task is still running, which makes a safe one-key rebuild:
 
 ```lua
-vim.keymap.set("n", "<F6>", "<Cmd>Tasksd repeat<CR>")
+vim.keymap.set("n", "<F6>", "<Cmd>Tasksd repeat_task<CR>")
 ```
 
 It runs the same argv in the same directory, so a command that needed a shell
@@ -275,8 +302,8 @@ rather than showing output, since a finished task has nothing to subscribe to.
 
 ```vim
 :Tasksd list_tasks
-:Tasksd list_tasks running
-:Tasksd list_tasks finished
+:Tasksd list_tasks filter=running
+:Tasksd list_tasks filter=finished
 ```
 
 opens a picker of the daemon's tasks — id, state, command line, working
@@ -600,6 +627,7 @@ Integration tests need a real tasksd binary and skip themselves without one;
 - [ ] Output buffer slots
 
 Requires tasksd 0.3.0:
+- [ ] Load missing output
 - [ ] Preview of a task in picker
 - [ ] Task info in the output window
 

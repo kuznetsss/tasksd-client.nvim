@@ -6,12 +6,12 @@ local picker = require("tasksd.picker")
 local task = require("tasksd.task")
 local task_picker = require("tasksd.task_picker")
 
----`:Tasksd send_signal [task_id=<id|last>] [signal=<name|number>]` -- signal a
----task.
+---`:Tasksd send_signal [task_id=<id|last>] [signal=<name|number>]`, or
+---`require("tasksd").send_signal(opts)` -- signal a task.
 ---
 ---With neither argument this asks two questions in pickers: which task, then
----which signal. The arguments are `key=value` so that ordering never matters
----and so either question can be answered in advance without answering both.
+---which signal. Either can be answered in advance without answering both, and
+---ordering never matters.
 ---@class tasksd.command.SendSignal : tasksd.Subcommand
 local M = {}
 
@@ -23,6 +23,10 @@ M.DEFAULT_SIGNAL = "TERM"
 local LAST = "last"
 
 local KEYS = { "signal=", "task_id=" }
+
+---@class tasksd.command.send_signal.Opts
+---@field task_id? integer|"last" The task to signal; without one, a picker asks.
+---@field signal? string|integer A number, or a name such as `TERM`/`sigterm`.
 
 ---Signal names as *this* machine numbers them, which is also how the daemon
 ---numbers them: the two talk over a unix socket, so they always share a kernel.
@@ -49,9 +53,19 @@ M.signal_names = function()
   return names
 end
 
----@param spec string A signal number, or a name such as `TERM`/`sigterm`.
+---@param spec string|integer A signal number, or a name such as `TERM`/`sigterm`.
 ---@return integer|nil signal, string|nil err
 M.signal_number = function(spec)
+  if type(spec) == "number" then
+    if spec < 1 or spec % 1 ~= 0 then
+      return nil, ("`%s` is not a signal number"):format(tostring(spec))
+    end
+    return spec
+  end
+  if type(spec) ~= "string" then
+    return nil, ("expected a signal name or number, got %s"):format(type(spec))
+  end
+
   if spec:match("^%d+$") then
     local number = assert(tonumber(spec))
     if number < 1 then
@@ -75,12 +89,6 @@ M.signal_number = function(spec)
   return number
 end
 
----@param args string[]
----@return table<string, string>|nil values, string|nil err
-M.parse = function(args)
-  return arguments.parse(args, KEYS)
-end
-
 ---The `task.send_signal` params; see `docs/API.md` in tasksd.
 ---@class tasksd.TaskSignalParams
 ---@field task_id integer
@@ -94,34 +102,53 @@ end
 ---@field signal integer
 
 ---@param args string[]
----@return tasksd.command.SignalTarget|nil target, string|nil err
-M.params = function(args)
-  local values, parse_err = M.parse(args)
+---@return tasksd.command.send_signal.Opts|nil opts, string|nil err
+M.from_argv = function(args)
+  local values, err = arguments.parse(args, KEYS)
   if not values then
-    return nil, parse_err
+    return nil, err
   end
-  return M.params_from(values)
+
+  local task_id
+  if values.task_id then
+    if values.task_id ~= LAST and not values.task_id:match("^%d+$") then
+      return nil, ("expected a task id or `%s`, got `%s`"):format(LAST, values.task_id)
+    end
+    task_id = tonumber(values.task_id) or LAST
+  end
+
+  ---@type tasksd.command.send_signal.Opts
+  local opts = { task_id = task_id, signal = values.signal }
+  return opts, nil
 end
 
----@param values table<string, string> As `M.parse` returns them.
----@return tasksd.command.SignalTarget|nil target, string|nil err
-M.params_from = function(values)
-  if not values.task_id then
-    return nil, "task_id= is required"
-  end
-  if values.task_id ~= LAST and not values.task_id:match("^%d+$") then
-    return nil, ("expected a task id or `%s`, got `%s`"):format(LAST, values.task_id)
+---Everything that can be checked without a connection. The signal is left nil
+---when none was asked for: `M.run` defaults it only on the path that already
+---knows which task, since the other path opens a picker for it instead.
+---@param opts tasksd.command.send_signal.Opts
+---@return { task_id: integer|"last"|nil, signal: integer|nil }|nil target, string|nil err
+M.validate = function(opts)
+  local task_id
+  if opts.task_id ~= nil then
+    if opts.task_id ~= LAST and (type(opts.task_id) ~= "number" or opts.task_id < 0) then
+      return nil, ("expected a task id or `%s`, got `%s`"):format(LAST, tostring(opts.task_id))
+    end
+    task_id = opts.task_id
   end
 
-  local signal, signal_err = M.signal_number(values.signal or M.DEFAULT_SIGNAL)
-  if not signal then
-    return nil, signal_err
+  local signal
+  if opts.signal ~= nil then
+    local number, err = M.signal_number(opts.signal)
+    if not number then
+      return nil, err
+    end
+    signal = number
   end
 
-  return { task_id = tonumber(values.task_id) or LAST, signal = signal }, nil
+  return { task_id = task_id, signal = signal }, nil
 end
 
----Put a number to `target`, which is everything `M.params_from` could not do
+---Put a number to `target`, which is everything `M.validate` could not do
 ---without a connection.
 ---@param target tasksd.command.SignalTarget
 ---@param c tasksd.Client
@@ -233,36 +260,42 @@ M.choose_task = function(on_choice)
   })
 end
 
-M.impl = function(args)
-  local values, parse_err = M.parse(args)
-  if not values then
-    log.error(tostring(parse_err))
+---@param opts tasksd.command.send_signal.Opts|nil
+M.run = function(opts)
+  vim.validate("opts", opts, "table", true)
+
+  local target, err = M.validate(opts or {})
+  if not target then
+    log.error(tostring(err))
     return
   end
 
-  if values.task_id then
-    local params, err = M.params_from(values)
-    if not params then
-      log.error(tostring(err))
-      return
-    end
-    M.send(params)
+  if target.task_id then
+    M.send({
+      task_id = target.task_id,
+      signal = target.signal or assert(M.signal_number(M.DEFAULT_SIGNAL)),
+    })
     return
   end
 
   M.choose_task(function(entry)
-    -- A `signal=` on the command line answers the second question in advance.
-    if not values.signal then
+    -- A signal given in advance answers the second question, so only the task
+    -- is asked for.
+    if not target.signal then
       M.choose_signal(entry)
       return
     end
-    local signal, signal_err = M.signal_number(values.signal)
-    if not signal then
-      log.error(tostring(signal_err))
-      return
-    end
-    M.send({ task_id = entry.id, signal = signal })
+    M.send({ task_id = entry.id, signal = target.signal })
   end)
+end
+
+M.impl = function(args)
+  local opts, err = M.from_argv(args)
+  if not opts then
+    log.error(tostring(err))
+    return
+  end
+  M.run(opts)
 end
 
 ---@param arg_lead string

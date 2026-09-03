@@ -6,7 +6,7 @@ local client = require("tasksd.client")
 local config = require("tasksd.config")
 local last = require("tasksd.last")
 local log = require("tasksd.log")
-local repeat_task = require("tasksd.command.repeat")
+local repeat_task = require("tasksd.command.repeat_task")
 local start_task = require("tasksd.command.start_task")
 
 local TASKSD = os.getenv("TASKSD_BIN")
@@ -183,7 +183,7 @@ T["impl()"] = new_set()
 ---@return integer task_id
 local function start(messages, command)
   local before = #messages
-  start_task.start({ working_dir = "/tmp", command = command })
+  start_task.start({ working_dir = "/tmp", command = command, show_output = false })
   wait_for(messages, before + 1)
   return assert(tonumber(messages[before + 1].msg:match("as task (%d+)$")), "no task id reported")
 end
@@ -201,7 +201,7 @@ T["impl()"]["starts the last task again once it has finished"] = function()
     eq(find(msgs, ("^task %d finished$"):format(first)) ~= nil, true)
 
     local before = #msgs
-    repeat_task.impl({}, false)
+    repeat_task.run()
     wait_for(msgs, before + 2)
 
     local again =
@@ -220,11 +220,11 @@ T["impl()"]["refuses while the last task is still running"] = function()
   local messages = with_capture(function(msgs)
     local id = start(msgs, "sleep 60")
 
-    repeat_task.impl({}, false)
+    repeat_task.run()
     wait_for(msgs, 2)
 
     eq(msgs[2].level, vim.log.levels.WARN)
-    eq(msgs[2].msg, ("task %d is still running; `:Tasksd repeat!` starts another"):format(id))
+    eq(msgs[2].msg, ("task %d is still running; `:Tasksd! repeat_task` starts another"):format(id))
   end)
 
   -- One start, one refusal, and nothing else.
@@ -240,7 +240,7 @@ T["impl()"]["a bang starts another one anyway"] = function()
     local id = start(msgs, "sleep 60")
 
     local before = #msgs
-    repeat_task.impl({}, true)
+    repeat_task.run({ force = true })
     wait_for(msgs, before + 1)
 
     local again =
@@ -263,7 +263,7 @@ T["impl()"]["offers the finished tasks when there is no last task"] = function()
     wait_for(msgs, 2)
     last.reset()
 
-    repeat_task.impl({}, false)
+    repeat_task.run()
     vim.wait(15000, function()
       return #specs >= 1
     end, 20)
@@ -289,7 +289,7 @@ T["impl()"]["says so when the daemon has nothing to offer either"] = function()
   local specs = use_own_daemon()
 
   local messages = with_capture(function(msgs)
-    repeat_task.impl({}, false)
+    repeat_task.run()
     wait_for(msgs, 1)
   end)
 
@@ -303,7 +303,7 @@ T["impl()"]["reports an unusable socket setting without connecting"] = function(
   config.setup({ daemon = { socket = "nonsense" } })
 
   local messages = with_capture(function(msgs)
-    repeat_task.impl({}, false)
+    repeat_task.run()
     wait_for(msgs, 1)
   end)
 

@@ -1,3 +1,4 @@
+local arguments = require("tasksd.args")
 local client = require("tasksd.client")
 local config = require("tasksd.config")
 local form = require("tasksd.form")
@@ -6,11 +7,25 @@ local log = require("tasksd.log")
 local output = require("tasksd.output")
 local task = require("tasksd.task")
 
----`:Tasksd start_task` -- collect a command in a floating form, then start it.
+---`:Tasksd start_task [working_dir=<dir>] [show_output=<bool>] [shell=<bool>]
+---[command=<argv>]`, or `require("tasksd").start_task(opts)` -- start a task.
+---
+---A `command` starts straight away; without one the floating form opens, with
+---whatever else was given already filled in. `command=` takes the rest of the
+---line, so it goes last.
 ---@class tasksd.command.StartTask : tasksd.Subcommand
 local M = {}
 
-M.desc = "Start a task on the daemon"
+M.desc = "Start a task on the daemon: [working_dir=] [show_output=] [shell=] [command=]"
+
+local KEYS = { "command=", "shell=", "show_output=", "working_dir=" }
+
+---The answers the form collects, and the arguments the command line takes.
+---@class tasksd.command.start_task.Opts
+---@field command? string The argv to run. Without one, the form asks.
+---@field working_dir? string Defaults to the current working directory.
+---@field show_output? boolean Defaults to `output.show_on_start`.
+---@field shell? boolean Run through `sh -c` whatever `shell.auto` would decide.
 
 ---Split what the user typed into the `executable` and `args` of `task.start`.
 ---No shell is involved, so quoting and globbing are not honoured.
@@ -41,18 +56,16 @@ end
 ---@field working_dir string
 ---@field subscribe_to_output boolean
 
----Turn what the form collected into `task.start` params.
----@param values table<string, string|boolean>
+---@param opts tasksd.command.start_task.Opts
 ---@return tasksd.TaskStartParams|nil params, string|nil err
-M.params = function(values)
-  local input = values.command
-  local command = vim.trim(type(input) == "string" and input or "")
+M.params = function(opts)
+  local command = vim.trim(type(opts.command) == "string" and opts.command or "")
   local executable, args = M.split(command)
   if not executable then
     return nil, "no command given"
   end
 
-  if values.shell == true or (config.current.shell.auto and M.needs_shell(command)) then
+  if opts.shell == true or (config.current.shell.auto and M.needs_shell(command)) then
     -- `sh` rather than `vim.o.shell`: the daemon is what spawns this, and an
     -- interactive login shell's rc files can change what the command means.
     executable, args = "sh", { "-c", command }
@@ -60,9 +73,14 @@ M.params = function(values)
 
   -- The daemon resolves a relative `working_dir` against its own cwd, which is
   -- wherever it happened to be launched from and outlives any `:cd` here.
-  local given = values.working_dir
+  local given = opts.working_dir
   local dir = vim.trim(type(given) == "string" and given or "")
   dir = dir == "" and vim.fn.getcwd() or vim.fn.fnamemodify(vim.fs.normalize(dir), ":p")
+
+  local show = opts.show_output
+  if show == nil then
+    show = config.current.output.show_on_start
+  end
 
   return {
     executable = executable,
@@ -71,7 +89,7 @@ M.params = function(values)
     -- Subscribing here rather than with `task.subscribe` once the window is
     -- open is what puts the task's first lines in the buffer: a subscription
     -- made later starts from wherever the output has got to.
-    subscribe_to_output = values.show_output == true,
+    subscribe_to_output = show == true,
   }
 end
 
@@ -123,9 +141,9 @@ M.send = function(params)
   end)
 end
 
----@param values table<string, string|boolean>
-M.start = function(values)
-  local params, err = M.params(values)
+---@param opts tasksd.command.start_task.Opts
+M.start = function(opts)
+  local params, err = M.params(opts)
   if not params then
     log.error(tostring(err))
     return
@@ -160,8 +178,11 @@ M.shell_label = function()
   return config.current.shell.auto and "Shell (autoshell enabled): " or "Shell: "
 end
 
+---@param opts tasksd.command.start_task.Opts|nil Answers to fill in already.
 ---@return tasksd.Form
-M.open = function()
+M.open = function(opts)
+  opts = opts or {}
+  local dir = opts.working_dir
   return form.open({
     title = "Start task",
     keys = config.current.form.keys,
@@ -173,27 +194,111 @@ M.open = function()
         label = "Working directory: ",
         -- `:~` shortens a path under $HOME; `M.params` expands it again, and
         -- `getcompletion` completes it as it stands.
-        value = vim.fn.fnamemodify(vim.fn.getcwd(), ":~"),
+        value = dir or vim.fn.fnamemodify(vim.fn.getcwd(), ":~"),
         complete = M.complete_dir,
       },
       {
         name = "show_output",
         label = "Show output: ",
         type = "toggle",
-        value = config.current.output.show_on_start,
+        value = opts.show_output == nil and config.current.output.show_on_start or opts.show_output,
       },
       {
         name = "shell",
         label = M.shell_label(),
         type = "toggle",
+        value = opts.shell or false,
       },
     },
+    -- The form's field names are the option names, so what it submits is
+    -- already an Opts.
     on_submit = M.start,
   })
 end
 
-M.impl = function(_args)
-  M.open()
+---@param args string[]
+---@return tasksd.command.start_task.Opts|nil opts, string|nil err
+M.from_argv = function(args)
+  local values, err = arguments.parse(args, KEYS, "command")
+  if not values then
+    return nil, err
+  end
+
+  ---@type tasksd.command.start_task.Opts
+  local opts = { command = values.command, working_dir = values.working_dir }
+
+  for key, value in pairs({ shell = values.shell, show_output = values.show_output }) do
+    local flag, flag_err = arguments.boolean(value)
+    if flag == nil then
+      return nil, ("%s: %s"):format(key, flag_err)
+    end
+    ---@diagnostic disable-next-line: assign-type-mismatch
+    opts[key] = flag
+  end
+
+  return opts, nil
+end
+
+---@param opts tasksd.command.start_task.Opts
+---@return string|nil err
+M.validate = function(opts)
+  for key, want in pairs({ command = "string", working_dir = "string" }) do
+    if opts[key] ~= nil and type(opts[key]) ~= want then
+      return ("expected %s to be a %s, got %s"):format(key, want, type(opts[key]))
+    end
+  end
+  for _, key in ipairs({ "shell", "show_output" }) do
+    if opts[key] ~= nil and type(opts[key]) ~= "boolean" then
+      return ("expected %s to be a boolean, got %s"):format(key, type(opts[key]))
+    end
+  end
+  return nil
+end
+
+---@param opts tasksd.command.start_task.Opts|nil
+M.run = function(opts)
+  vim.validate("opts", opts, "table", true)
+  opts = opts or {}
+
+  local err = M.validate(opts)
+  if err then
+    log.error(err)
+    return
+  end
+
+  if opts.command and vim.trim(opts.command) ~= "" then
+    M.start(opts)
+    return
+  end
+  M.open(opts)
+end
+
+M.impl = function(args)
+  local opts, err = M.from_argv(args)
+  if not opts then
+    log.error(tostring(err))
+    return
+  end
+  M.run(opts)
+end
+
+---@param arg_lead string
+---@return string[]
+M.complete = function(arg_lead)
+  return arguments.complete(arg_lead, KEYS, {
+    command = function(lead)
+      return vim.fn.getcompletion(lead, "shellcmd")
+    end,
+    working_dir = function(lead)
+      return vim.fn.getcompletion(lead, "dir")
+    end,
+    shell = function(lead)
+      return arguments.starting_with(lead, arguments.BOOLEANS)
+    end,
+    show_output = function(lead)
+      return arguments.starting_with(lead, arguments.BOOLEANS)
+    end,
+  })
 end
 
 return M

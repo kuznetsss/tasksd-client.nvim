@@ -16,15 +16,21 @@ M.subcommands = {
   install = require("tasksd.command.install"),
   list_tasks = require("tasksd.command.list_tasks"),
   output = require("tasksd.command.output"),
-  -- Quoted: `repeat` is a Lua keyword, so a bare key here is a syntax error.
-  ["repeat"] = require("tasksd.command.repeat"),
+  repeat_task = require("tasksd.command.repeat_task"),
   send_input = require("tasksd.command.send_input"),
   send_signal = require("tasksd.command.send_signal"),
   shutdown = require("tasksd.command.shutdown"),
   start_task = require("tasksd.command.start_task"),
 }
 
----Subcommand names, sorted so completion order is stable.
+---Older spellings that still dispatch, but are not offered or listed. `repeat`
+---cannot be the canonical name: `require("tasksd").repeat()` is a syntax error,
+---because `repeat` is a Lua keyword.
+---@type table<string, string>
+M.aliases = { ["repeat"] = "repeat_task" }
+
+---Subcommand names, sorted so completion order is stable. Aliases are left out:
+---they are for command lines already written, not for new ones.
 ---@return string[]
 M.names = function()
   local names = vim.tbl_keys(M.subcommands)
@@ -43,7 +49,7 @@ M.run = function(opts)
     return
   end
 
-  local subcommand = M.subcommands[name]
+  local subcommand = M.subcommands[M.aliases[name] or name]
   if not subcommand then
     log.error(
       ("unknown subcommand `%s`, expected one of: %s"):format(name, table.concat(M.names(), ", "))
@@ -64,7 +70,7 @@ M.complete = function(arg_lead, cmd_line, _cursor_pos)
   local settled = cmd_line:match("^%s*Tasksd%s+(%S+)%s")
 
   if settled then
-    local subcommand = M.subcommands[settled]
+    local subcommand = M.subcommands[M.aliases[settled] or settled]
     if subcommand and subcommand.complete then
       return subcommand.complete(arg_lead)
     end

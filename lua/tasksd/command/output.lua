@@ -3,17 +3,17 @@ local log = require("tasksd.log")
 local output = require("tasksd.output")
 local window = require("tasksd.output.window")
 
----`:Tasksd[!] output [task_id=<id>] [position=<where>]` -- show or hide a
----task's output.
+---`:Tasksd[!] output [task_id=<id>] [position=<where>]`, or
+---`require("tasksd").output(opts)` -- show or hide a task's output.
 ---
 ---With no arguments this toggles: it hides an open window, and reopens the task
 ---the window last showed, asking which task when there has not been one yet. A
 ---`position=` says where the window goes rather than whether it is open, so it
 ---moves an open window instead of closing it.
 ---
----The bang is the forceful variant of the same action rather than another
----answer to a question, which is why it is a bang and not a `reset=`: it
----discards where the window was dragged to and puts it back where the config
+---`force` is the forceful variant of the same action rather than another answer
+---to a question, which is why the command line spells it `!` and not `force=`:
+---it discards where the window was dragged to and puts it back where the config
 ---says.
 ---@class tasksd.command.Output : tasksd.Subcommand
 local M = {}
@@ -22,60 +22,75 @@ M.desc = "Show or hide a task's output: [task_id=<id>] [position=<where>]"
 
 local KEYS = { "position=", "task_id=" }
 
----@param args string[]
----@return table<string, string>|nil values, string|nil err
-M.parse = function(args)
-  return arguments.parse(args, KEYS)
-end
-
----What the command line asked for: a task to show, or nothing and a toggle.
----@class tasksd.command.output.Request
----@field task_id integer|nil
----@field opts tasksd.output.Opts
+---@class tasksd.command.output.Opts
+---@field task_id? integer The task to show; without one, the window toggles.
+---@field position? tasksd.output.Position
+---@field force? boolean
 
 ---@param args string[]
----@param bang boolean
----@return tasksd.command.output.Request|nil request, string|nil err
-M.request = function(args, bang)
-  local values, err = M.parse(args)
+---@param force boolean
+---@return tasksd.command.output.Opts|nil opts, string|nil err
+M.from_argv = function(args, force)
+  local values, err = arguments.parse(args, KEYS)
   if not values then
     return nil, err
   end
 
-  ---@type tasksd.output.Opts
-  local opts = { reset = bang or nil }
-
-  if values.position then
-    if not vim.tbl_contains(window.POSITIONS, values.position) then
-      return nil,
-        ("unknown position `%s`, expected one of: %s"):format(
-          values.position,
-          table.concat(window.POSITIONS, ", ")
-        )
+  local task_id
+  if values.task_id then
+    if not values.task_id:match("^%d+$") then
+      return nil, ("`%s` is not a task id"):format(values.task_id)
     end
-    ---@cast values -nil
-    opts.position = values.position
+    task_id = tonumber(values.task_id)
   end
 
-  if values.task_id and not values.task_id:match("^%d+$") then
-    return nil, ("`%s` is not a task id"):format(values.task_id)
-  end
-
-  return { task_id = values.task_id and tonumber(values.task_id) or nil, opts = opts }, nil
+  ---@type tasksd.command.output.Opts
+  local opts = { task_id = task_id, position = values.position, force = force or nil }
+  return opts, nil
 end
 
-M.impl = function(args, bang)
-  local request, err = M.request(args, bang)
-  if not request then
+---@param opts tasksd.command.output.Opts
+---@return tasksd.output.Opts|nil show_opts, string|nil err
+M.validate = function(opts)
+  if opts.position and not vim.tbl_contains(window.POSITIONS, opts.position) then
+    return nil,
+      ("unknown position `%s`, expected one of: %s"):format(
+        opts.position,
+        table.concat(window.POSITIONS, ", ")
+      )
+  end
+  if opts.task_id ~= nil and (type(opts.task_id) ~= "number" or opts.task_id < 0) then
+    return nil, ("`%s` is not a task id"):format(tostring(opts.task_id))
+  end
+
+  return { position = opts.position, reset = opts.force }, nil
+end
+
+---@param opts tasksd.command.output.Opts|nil
+M.run = function(opts)
+  vim.validate("opts", opts, "table", true)
+  opts = opts or {}
+
+  local show_opts, err = M.validate(opts)
+  if not show_opts then
     log.error(tostring(err))
     return
   end
 
-  if request.task_id then
-    output.show(request.task_id, request.opts)
+  if opts.task_id then
+    output.show(opts.task_id, show_opts)
     return
   end
-  output.toggle(request.opts)
+  output.toggle(show_opts)
+end
+
+M.impl = function(args, bang)
+  local opts, err = M.from_argv(args, bang)
+  if not opts then
+    log.error(tostring(err))
+    return
+  end
+  M.run(opts)
 end
 
 ---@param arg_lead string

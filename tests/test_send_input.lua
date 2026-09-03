@@ -128,34 +128,59 @@ local T = new_set({
 })
 
 --------------------------------------------------------------------------------
--- parse
+-- arguments
 --------------------------------------------------------------------------------
 
-T["parse()"] = new_set()
+T["from_argv()"] = new_set()
 
-T["parse()"]["reads both keys"] = function()
-  eq(send_input.parse({ "task_id=3", "input=yes" }), { task_id = "3", input = "yes" })
+T["from_argv()"]["reads both keys"] = function()
+  eq(send_input.from_argv({ "task_id=3", "input=yes" }), { task_id = 3, input = "yes" })
 end
 
 -- fargs is already split on whitespace, so input= has to take what follows.
-T["parse()"]["gives input= the rest of the arguments"] = function()
-  eq(send_input.parse({ "task_id=3", "input=hello", "there", "world" }).input, "hello there world")
+T["from_argv()"]["gives input= the rest of the arguments"] = function()
+  eq(
+    send_input.from_argv({ "task_id=3", "input=hello", "there", "world" }).input,
+    "hello there world"
+  )
 end
 
-T["parse()"]["keeps an empty input"] = function()
-  eq(send_input.parse({ "input=" }).input, "")
+T["from_argv()"]["keeps an empty input"] = function()
+  eq(send_input.from_argv({ "input=" }).input, "")
 end
 
-T["parse()"]["rejects a bare word"] = function()
-  local values, err = send_input.parse({ "3" })
-  eq(values, nil)
+T["from_argv()"]["rejects a bare word"] = function()
+  local opts, err = send_input.from_argv({ "3" })
+  eq(opts, nil)
   eq(err, "expected key=value, got `3`")
 end
 
-T["parse()"]["rejects an unknown key"] = function()
-  local values, err = send_input.parse({ "text=hi" })
-  eq(values, nil)
+T["from_argv()"]["rejects an unknown key"] = function()
+  local opts, err = send_input.from_argv({ "text=hi" })
+  eq(opts, nil)
   eq(tostring(err):match("^unknown argument `text`") ~= nil, true)
+end
+
+T["from_argv()"]["rejects a task id that is not a number"] = function()
+  local opts, err = send_input.from_argv({ "task_id=abc", "input=yes" })
+  eq(opts, nil)
+  eq(err, "`abc` is not a task id")
+end
+
+T["validate()"] = new_set()
+
+T["validate()"]["accepts what the command line can produce"] = function()
+  eq(send_input.validate({ task_id = 3, input = "yes" }), nil)
+end
+
+-- Neither is required: a missing one is a question rather than an error.
+T["validate()"]["accepts an empty request"] = function()
+  eq(send_input.validate({}), nil)
+end
+
+T["validate()"]["rejects a task id that is not a number"] = function()
+  ---@diagnostic disable-next-line: assign-type-mismatch
+  eq(send_input.validate({ task_id = "3" }), "`3` is not a task id")
 end
 
 --------------------------------------------------------------------------------
@@ -174,34 +199,6 @@ end
 
 T["line()"]["turns an empty answer into a bare newline"] = function()
   eq(send_input.line(""), "\n")
-end
-
---------------------------------------------------------------------------------
--- params
---------------------------------------------------------------------------------
-
-T["params()"] = new_set()
-
-T["params()"]["builds the request from key=value arguments"] = function()
-  eq(send_input.params({ "task_id=3", "input=yes" }), { task_id = 3, input = "yes\n" })
-end
-
-T["params()"]["requires a task id"] = function()
-  local params, err = send_input.params({ "input=yes" })
-  eq(params, nil)
-  eq(err, "task_id= is required")
-end
-
-T["params()"]["requires input"] = function()
-  local params, err = send_input.params({ "task_id=3" })
-  eq(params, nil)
-  eq(err, "input= is required")
-end
-
-T["params()"]["rejects a task id that is not a number"] = function()
-  local params, err = send_input.params({ "task_id=abc", "input=yes" })
-  eq(params, nil)
-  eq(err, "`abc` is not a task id")
 end
 
 --------------------------------------------------------------------------------
@@ -284,7 +281,7 @@ T["send()"]["writes to a running task's stdin"] = function()
   use_own_daemon()
 
   local messages = with_capture(function(msgs)
-    start_task.start({ working_dir = "/tmp", command = "cat" })
+    start_task.start({ working_dir = "/tmp", command = "cat", show_output = false })
     wait_for(msgs, 1)
     local task_id = assert(msgs[1].msg:match("as task (%d+)$"))
 
@@ -336,7 +333,7 @@ T["impl()"]["asks which task, then for the text, then sends it"] = function()
   local prompts = stub_ui_input("hello")
 
   local messages = with_capture(function(msgs)
-    start_task.start({ working_dir = "/tmp", command = "cat" })
+    start_task.start({ working_dir = "/tmp", command = "cat", show_output = false })
     wait_for(msgs, 1)
     local task_id = assert(tonumber(msgs[1].msg:match("as task (%d+)$")))
 
@@ -368,7 +365,7 @@ T["impl()"]["takes input= as the second answer in advance"] = function()
   local prompts = stub_ui_input("unused")
 
   local messages = with_capture(function(msgs)
-    start_task.start({ working_dir = "/tmp", command = "cat" })
+    start_task.start({ working_dir = "/tmp", command = "cat", show_output = false })
     wait_for(msgs, 1)
 
     send_input.impl({ "input=hello", "there" })

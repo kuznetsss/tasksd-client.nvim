@@ -159,13 +159,27 @@ end
 T["params()"] = new_set(restores_config)
 
 T["params()"]["builds the request from the form values"] = function()
-  local params = start_task.params({ working_dir = "/tmp", command = "ls -la" })
+  local params =
+    start_task.params({ working_dir = "/tmp", command = "ls -la", show_output = false })
   eq(params, {
     executable = "ls",
     args = { "-la" },
     working_dir = "/tmp/",
     subscribe_to_output = false,
   })
+end
+
+-- The form always submits a boolean, so this is the path a Lua caller or a
+-- command line that left `show_output=` out takes.
+T["params()"]["falls back to show_on_start when nothing says"] = function()
+  local original = config.current.output.show_on_start
+
+  config.current.output.show_on_start = true
+  eq(assert(start_task.params({ command = "ls" })).subscribe_to_output, true)
+  config.current.output.show_on_start = false
+  eq(assert(start_task.params({ command = "ls" })).subscribe_to_output, false)
+
+  config.current.output.show_on_start = original
 end
 
 -- Subscribing at `task.start` rather than with `task.subscribe` once the window
@@ -275,6 +289,121 @@ T["open()"]["leaves the shell box unticked"] = function()
   eq(values.shell, false)
 end
 
+--------------------------------------------------------------------------------
+-- arguments
+--------------------------------------------------------------------------------
+
+T["from_argv()"] = new_set()
+
+T["from_argv()"]["takes nothing at all"] = function()
+  eq(start_task.from_argv({}), {})
+end
+
+-- fargs is already split on whitespace, so command= has to take what follows.
+T["from_argv()"]["gives command= the rest of the arguments"] = function()
+  eq(
+    start_task.from_argv({ "command=cargo", "build", "--release" }).command,
+    "cargo build --release"
+  )
+end
+
+T["from_argv()"]["reads the other keys"] = function()
+  eq(start_task.from_argv({ "working_dir=/tmp", "shell=true", "show_output=false" }), {
+    working_dir = "/tmp",
+    shell = true,
+    show_output = false,
+  })
+end
+
+T["from_argv()"]["rejects a value that is not a boolean"] = function()
+  local opts, err = start_task.from_argv({ "shell=yes" })
+  eq(opts, nil)
+  eq(err, "shell: expected true or false, got `yes`")
+end
+
+T["from_argv()"]["rejects an unknown key"] = function()
+  local opts, err = start_task.from_argv({ "cwd=/tmp" })
+  eq(opts, nil)
+  eq(tostring(err):match("^unknown argument `cwd`") ~= nil, true)
+end
+
+T["complete()"] = new_set()
+
+T["complete()"]["offers the keys"] = function()
+  eq(start_task.complete(""), { "command=", "shell=", "show_output=", "working_dir=" })
+end
+
+T["complete()"]["offers true and false for a toggle"] = function()
+  eq(start_task.complete("shell="), { "shell=false", "shell=true" })
+end
+
+--------------------------------------------------------------------------------
+-- run
+--------------------------------------------------------------------------------
+
+T["run()"] = new_set()
+
+---Run `fn` with `send` replaced by a recorder and the form stubbed out, so
+---nothing here opens a window or reaches for a daemon.
+---@param fn fun(sent: tasksd.TaskStartParams[], opened: tasksd.command.start_task.Opts[])
+local function without_side_effects(fn)
+  local original_send, original_open = start_task.send, start_task.open
+  local sent, opened = {}, {}
+
+  ---@diagnostic disable-next-line: duplicate-set-field
+  start_task.send = function(params)
+    table.insert(sent, params)
+  end
+  ---@diagnostic disable-next-line: duplicate-set-field
+  start_task.open = function(opts)
+    table.insert(opened, opts or {})
+  end
+
+  local ok, err = pcall(fn, sent, opened)
+
+  start_task.send, start_task.open = original_send, original_open
+  if not ok then
+    error(err, 0)
+  end
+end
+
+T["run()"]["starts a command it was given"] = function()
+  without_side_effects(function(sent, opened)
+    start_task.run({ command = "ls -la", working_dir = "/tmp" })
+    eq(#opened, 0)
+    eq(#sent, 1)
+    eq({ sent[1].executable, sent[1].args }, { "ls", { "-la" } })
+  end)
+end
+
+-- The point of the argument: a keymap for a fixed command should not stop to
+-- ask about it.
+T["run()"]["opens the form without a command"] = function()
+  without_side_effects(function(sent, opened)
+    start_task.run({ working_dir = "/tmp" })
+    eq(#sent, 0)
+    eq(opened, { { working_dir = "/tmp" } })
+  end)
+end
+
+T["run()"]["treats a blank command as none"] = function()
+  without_side_effects(function(sent, opened)
+    start_task.run({ command = "   " })
+    eq(#sent, 0)
+    eq(#opened, 1)
+  end)
+end
+
+-- The command line and the Lua call are the same request written two ways.
+T["run()"]["matches the command line"] = function()
+  without_side_effects(function(sent)
+    vim.cmd("Tasksd start_task working_dir=/tmp show_output=false command=ls -la")
+    require("tasksd").start_task({ working_dir = "/tmp", show_output = false, command = "ls -la" })
+    eq(#sent, 2)
+    eq(sent[1], sent[2])
+  end)
+end
+
 T["shell_label()"] = new_set(restores_config)
 
 T["shell_label()"]["says whether autoshell is armed"] = function()
@@ -370,7 +499,7 @@ T["start()"]["reports an unusable socket setting without connecting"] = function
   config.setup({ daemon = { socket = "nonsense" } })
 
   local messages = capture(1, function()
-    start_task.start({ working_dir = "/tmp", command = "ls" })
+    start_task.start({ working_dir = "/tmp", command = "ls", show_output = false })
   end)
 
   eq(messages[1].level, vim.log.levels.ERROR)
