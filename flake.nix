@@ -23,12 +23,15 @@
           name = "tasksd-client.nvim";
 
           packages = with pkgs; [
+            coreutils
+            curl
+            gnutar
             just
-            stylua
-            selene
             lua-language-server
             neovim
             rustup
+            selene
+            stylua
           ];
           shellHook = ''
             export MINI_NVIM="${pkgs.vimPlugins.mini-nvim}"
