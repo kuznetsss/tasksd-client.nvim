@@ -20,6 +20,7 @@ local KEYS = { "method=" }
 ---@class tasksd.command.install.Opts
 ---@field method? string Defaults to `install.method` from the config.
 ---@field force? boolean Install even when a usable tasksd is already there.
+---@field on_done? fun(ok: boolean, err: string|nil) Every outcome, the skip included: it reports the postcondition, not whether work happened. Lua-only -- a command line has nowhere to put a function.
 
 ---Two installs at once would race: cargo builds into the same `--root`, and the
 ---github method stages through one fixed path before renaming over the binary.
@@ -42,6 +43,13 @@ end
 M.run = function(opts)
   vim.validate("opts", opts, "table", true)
   opts = opts or {}
+  vim.validate("opts.on_done", opts.on_done, "function", true)
+
+  local function finish(ok, err)
+    if opts.on_done then
+      opts.on_done(ok, err)
+    end
+  end
 
   -- Not validated here: `install.run` rejects an unknown name and lists the
   -- real ones, so a typo in `install.method` reads the same as one typed at
@@ -50,6 +58,7 @@ M.run = function(opts)
 
   if running then
     log.warn("an install is already running")
+    finish(false, "an install is already running")
     return
   end
 
@@ -67,6 +76,7 @@ M.run = function(opts)
           daemon.SOURCE_LABEL[source]
         )
       )
+      finish(true, nil)
       return
     end
   end
@@ -79,9 +89,11 @@ M.run = function(opts)
     running = false
     if not ok then
       log.error(("install failed: %s"):format(tostring(err)))
+      finish(false, err)
       return
     end
     log.info(("installed tasksd %s to %s"):format(pin.VERSION, install.bin_path()))
+    finish(true, nil)
   end, log.info)
 end
 

@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Actions only. The nix inputs are `nix flake update`'s job, and a bump there
+  # changes what `just check` and `just test` run -- not something to land
+  # unattended.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,7 +1,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Lua sources that stylua/selene operate on.
-srcs := "lua plugin tests"
+srcs := "lua plugin tests .github/scripts"
 # Scratch dir for lua-language-server logs / reports (gitignored).
 build := ".build"
 

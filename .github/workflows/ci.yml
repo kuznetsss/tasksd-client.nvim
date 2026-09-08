@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - run: nix develop --command just check
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-26]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Resolve where the plugin installs tasksd
+        run: |
+          bin="$(nix develop --command nvim -l .github/scripts/bin-path.lua)"
+          echo "TASKSD_BIN=$bin" >> "$GITHUB_ENV"
+
+      - name: Restore the built tasksd
+        if: runner.os == 'macOS'
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TASKSD_BIN }}
+          key: tasksd-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lua/tasksd/install/pin.lua') }}
+
+      - name: Select a Rust toolchain
+        if: runner.os == 'macOS'
+        run: nix develop --command rustup default stable
+
+      - name: Install tasksd
+        run: nix develop --command nvim -l .github/scripts/install.lua
+
+      - run: nix develop --command just test
+
+  ci:
+    if: always()
+    needs: [check, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report the other jobs' results
+        run: |
+          echo 'check: ${{ needs.check.result }}'
+          echo 'test:  ${{ needs.test.result }}'
+      - if: >-
+          contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || contains(needs.*.result, 'skipped')
+        run: exit 1

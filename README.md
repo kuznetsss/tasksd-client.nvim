@@ -109,6 +109,18 @@ Already have a tasksd? Point at it and skip the install entirely:
 require("tasksd").setup({ daemon = { path = "~/.cargo/bin/tasksd" } })
 ```
 
+Installing is asynchronous, and the command reports only by notifying. To
+bootstrap one from a script — a dotfiles setup, or CI — pass `on_done`, which
+is called on every outcome, the refusal above included:
+
+```lua
+require("tasksd").install({
+  on_done = function(ok, err)
+    vim.print(ok and "ready" or err)
+  end,
+})
+```
+
 ### Checking the setup
 
 ```vim

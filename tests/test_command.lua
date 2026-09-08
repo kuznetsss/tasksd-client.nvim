@@ -370,4 +370,94 @@ T["install"]["accepts another install once the first finished"] = function()
   end)
 end
 
+-- `on_done` exists because an install is asynchronous and `:Tasksd install`
+-- reports only by notifying: a script driving this headlessly has nothing else
+-- to wait on. Every other case in this file leaves it out, which is the
+-- coverage that it stays optional.
+T["install"]["reports success through on_done"] = function()
+  with_stubbed_run(function(calls)
+    with_notify(function()
+      local outcome
+      require("tasksd").install({
+        method = "cargo",
+        on_done = function(ok, err)
+          outcome = { ok = ok, err = err }
+        end,
+      })
+
+      eq(outcome, nil)
+      calls[1].done(true, nil)
+      eq(outcome, { ok = true, err = nil })
+    end)
+  end)
+end
+
+T["install"]["reports a failure through on_done"] = function()
+  with_stubbed_run(function(calls)
+    with_notify(function()
+      local outcome
+      require("tasksd").install({
+        method = "cargo",
+        on_done = function(ok, err)
+          outcome = { ok = ok, err = err }
+        end,
+      })
+      calls[1].done(false, "boom")
+
+      eq(outcome, { ok = false, err = "boom" })
+    end)
+  end)
+end
+
+-- The skip is a success: what a caller waits for is a usable tasksd, not work.
+T["install"]["reports the skip through on_done"] = function()
+  local ran = false
+
+  with_run(function()
+    ran = true
+  end, function()
+    with_usable("0.2.0", "installed", function()
+      with_notify(function()
+        local outcome
+        require("tasksd").install({
+          on_done = function(ok, err)
+            outcome = { ok = ok, err = err }
+          end,
+        })
+
+        eq(ran, false)
+        eq(outcome, { ok = true, err = nil })
+      end)
+    end)
+  end)
+end
+
+T["install"]["reports a refused concurrent install through on_done"] = function()
+  with_stubbed_run(function(calls)
+    with_notify(function()
+      local outcome
+      require("tasksd").install({ method = "cargo" })
+      require("tasksd").install({
+        method = "cargo",
+        on_done = function(ok, err)
+          outcome = { ok = ok, err = err }
+        end,
+      })
+
+      eq(#calls, 1)
+      eq(outcome.ok, false)
+      eq(outcome.err, "an install is already running")
+
+      -- Leaving it unfinished would make every later case see a busy install.
+      calls[1].done(true, nil)
+    end)
+  end)
+end
+
+T["install"]["rejects an on_done that is not a function"] = function()
+  ---@diagnostic disable-next-line: assign-type-mismatch
+  local ok = pcall(require("tasksd").install, { on_done = "nope" })
+  eq(ok, false)
+end
+
 return T
