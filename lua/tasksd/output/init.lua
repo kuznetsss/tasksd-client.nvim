@@ -41,6 +41,30 @@ local last_task = nil
 ---@type integer|nil
 local opening = nil
 
+---Tasks with a `task.unsubscribe` still on the wire, and what is waiting on the
+---answer. The daemon handles each request in a coroutine of its own, so a
+---`task.subscribe` sent before the unsubscribe has been answered can be applied
+---ahead of it and switched straight back off -- leaving a window that holds a
+---subscription the daemon has stopped feeding, and only ever receives the
+---task's exit.
+---@type table<integer, { client: tasksd.Client, waiters: (fun())[] }>
+local unsubscribing = {}
+
+---Run `fn` once no `task.unsubscribe` for `task_id` is still unanswered. A
+---connection that has closed since took its subscriptions with it, so there is
+---nothing left to order against.
+---@param task_id integer
+---@param fn fun()
+local function after_unsubscribe(task_id, fn)
+  local pending = unsubscribing[task_id]
+  if not pending or not pending.client:is_connected() then
+    unsubscribing[task_id] = nil
+    fn()
+    return
+  end
+  table.insert(pending.waiters, fn)
+end
+
 ---@class tasksd.output.Opts
 ---@field position? tasksd.output.Position Open the window here rather than where it last was.
 ---@field reset? boolean Put the window back where the config says.
@@ -53,17 +77,45 @@ local opening = nil
 ---End a session: stop listening, give the subscription back, drop the buffer.
 ---Does not touch the window, which is what calls this on its way out.
 ---@param ending tasksd.output.Session|nil
-local function stop(ending)
+---@param keep tasksd.output.Session|nil The session taking over, when one is.
+local function stop(ending, keep)
   if not ending then
     return
   end
   for _, detach in ipairs(ending.detach) do
     detach()
   end
+  -- The daemon holds one subscription per task per connection, so a handover of
+  -- the same task on the same connection is the incoming session's subscription
+  -- too: giving it back would leave it receiving nothing but the task's exit.
+  local handover = keep ~= nil and keep.client == ending.client and keep.task_id == ending.task_id
+
   -- A subscription the daemon has already dropped answers `7 Task not found`,
-  -- and there is nothing worth saying about a window the user just closed.
-  if not ending.finished and ending.client:is_connected() then
-    ending.client:request("task.unsubscribe", { task_id = ending.task_id }, function() end)
+  -- and there is nothing worth saying about a window the user just closed. The
+  -- answer is still worth having: it is what a later `task.subscribe` orders
+  -- itself behind.
+  if not ending.finished and not handover and ending.client:is_connected() then
+    local task_id = ending.task_id
+    local pending = { client = ending.client, waiters = {} }
+    unsubscribing[task_id] = pending
+
+    local settled = false
+    local function settle()
+      if settled then
+        return
+      end
+      settled = true
+      if unsubscribing[task_id] == pending then
+        unsubscribing[task_id] = nil
+      end
+      for _, waiter in ipairs(pending.waiters) do
+        waiter()
+      end
+    end
+
+    if not ending.client:request("task.unsubscribe", { task_id = task_id }, settle) then
+      settle()
+    end
   end
   ending.buffer:close()
 end
@@ -216,7 +268,7 @@ local function begin(c, task_id, opts, note)
   window.open(s.buffer.buf, placement(opts))
   -- Only once the window holds the new buffer: deleting one still on screen
   -- takes its window down with it.
-  stop(previous)
+  stop(previous, s)
 end
 
 ---Show the output of a task this connection already receives, because it was
@@ -257,25 +309,27 @@ M.show = function(task_id, opts)
       return
     end
 
-    local sent = c:request("task.subscribe", { task_id = task_id }, function(rpc_err)
-      opening = nil
-      if not rpc_err then
-        begin(c, task_id, opts)
-        return
+    after_unsubscribe(task_id, function()
+      local sent = c:request("task.subscribe", { task_id = task_id }, function(rpc_err)
+        opening = nil
+        if not rpc_err then
+          begin(c, task_id, opts)
+          return
+        end
+        -- A finished task has nothing to subscribe to, but its window is still
+        -- worth opening: it says so, and it is where its output will go once the
+        -- daemon can hand back a task's last lines.
+        if rpc_err.code == EXITED then
+          begin(c, task_id, opts, ("task %d has already finished"):format(task_id))
+          return
+        end
+        log.error(("could not show task %d: %s"):format(task_id, client.describe_error(rpc_err)))
+      end)
+      if not sent then
+        opening = nil
+        log.error("could not send task.subscribe: the connection closed")
       end
-      -- A finished task has nothing to subscribe to, but its window is still
-      -- worth opening: it says so, and it is where its output will go once the
-      -- daemon can hand back a task's last lines.
-      if rpc_err.code == EXITED then
-        begin(c, task_id, opts, ("task %d has already finished"):format(task_id))
-        return
-      end
-      log.error(("could not show task %d: %s"):format(task_id, client.describe_error(rpc_err)))
     end)
-    if not sent then
-      opening = nil
-      log.error("could not send task.subscribe: the connection closed")
-    end
   end)
 end
 

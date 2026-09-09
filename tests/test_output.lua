@@ -2,6 +2,7 @@ local MiniTest = require("mini.test")
 local new_set = MiniTest.new_set
 local eq = MiniTest.expect.equality
 
+local buffer = require("tasksd.output.buffer")
 local client = require("tasksd.client")
 local config = require("tasksd.config")
 local output = require("tasksd.output")
@@ -47,10 +48,20 @@ local function has(lines_, text)
   end)
 end
 
+---Whether every gap the daemon reported has been filled. `task.missed_output`
+---reserves placeholder rows and the text for them arrives on a later round
+---trip, so a buffer can hold the tail of a task's output while its head is
+---still loading. Waiting on the tail alone samples that state.
+---@return boolean
+local function settled()
+  return not has(lines(), buffer.LOADING)
+end
+
 ---Start a task and wait for the daemon to report its id.
 ---@param argv string[]
+---@param subscribed boolean|nil Deliver its output without a `task.subscribe` first.
 ---@return integer task_id
-local function start(argv)
+local function start(argv, subscribed)
   local id, err
   client.get(function(c, connect_err)
     if not c then
@@ -61,7 +72,7 @@ local function start(argv)
       executable = argv[1],
       args = vim.list_slice(argv, 2),
       working_dir = "/tmp",
-      subscribe_to_output = false,
+      subscribe_to_output = subscribed or false,
     }, function(rpc_err, result)
       err = rpc_err and vim.inspect(rpc_err) or nil
       id = result and result.task_id
@@ -81,10 +92,13 @@ local function talker(seconds)
 end
 
 ---Keeps printing, so a window opened part-way through still sees something.
----Bounded, so a failed run cannot leave it behind for good.
+---Long enough to outlive a case on a loaded runner, and bounded so a failed run
+---cannot leave it behind for good. The socket path rides along in the argv
+---purely so `post_once`'s `pkill -f` matches these shells as well as the daemon.
 ---@return string[]
 local function ticker()
-  return { "sh", "-c", "i=0; while [ $i -lt 40 ]; do echo tick; sleep 0.25; i=$((i+1)); done" }
+  local script = "i=0; while [ $i -lt 240 ]; do echo tick; sleep 0.25; i=$((i+1)); done # %s"
+  return { "sh", "-c", script:format(SOCKET) }
 end
 
 local T = new_set({
@@ -117,7 +131,7 @@ T["show()"]["puts a running task's output in the window"] = function()
   output.show(id)
 
   until_("the task's output", function()
-    return has(lines(), "two")
+    return has(lines(), "two") and settled()
   end)
   eq(lines()[1], "one")
   eq(window.is_open(), true)
@@ -177,7 +191,7 @@ T["show()"]["writes how the task ended"] = function()
   output.show(id)
 
   until_("the exit line", function()
-    return has(lines(), ("task %d finished"):format(id))
+    return has(lines(), ("task %d finished"):format(id)) and settled()
   end)
   eq(lines()[1], "one")
 end
@@ -264,6 +278,24 @@ T["attach()"]["takes the buffer name back from the session it replaces"] = funct
   eq(vim.api.nvim_buf_get_name(assert(shown())), ("tasksd://task/%d"):format(id))
 end
 
+-- Both sessions are the same task on the same connection, so they are the same
+-- subscription: ending the outgoing one must not hand it back, or the incoming
+-- one is left waiting for output the daemon has stopped sending.
+T["attach()"]["keeps the output coming when it replaces a session for the same task"] = function()
+  local c = connection()
+  local id = start(ticker(), true)
+
+  output.attach(c, id)
+  until_("the task's output", function()
+    return has(lines(), "tick")
+  end)
+
+  output.attach(c, id)
+  until_("output after the handover", function()
+    return has(lines(), "tick")
+  end)
+end
+
 -- `subscribe_to_output` at `task.start` is what makes a task's opening lines
 -- reachable at all, and the window has to be listening in time to keep them:
 -- line 1, not just the tail.
@@ -274,7 +306,7 @@ T["show()"]["catches the first line of a task started subscribed"] = function()
   local ok, err = pcall(function()
     start_task.start({ command = "seq 1 300", working_dir = "/tmp", show_output = true })
     until_("the task's output", function()
-      return has(lines(), "300")
+      return has(lines(), "300") and settled()
     end)
   end)
   vim.notify = notify
