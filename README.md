@@ -262,6 +262,22 @@ With nothing started yet — a fresh Neovim, say — this opens the picker on th
 daemon's finished tasks instead, and starts whichever you choose. That one is
 not guarded: pointing at a task is asking for it.
 
+### Saving before a task runs
+
+A rebuild keyed to `<F6>` is only as good as what is on disk. With `auto_save`
+on, `start_task` and `repeat_task` write every modified buffer first — the
+whole editor, not just the file you are looking at, since when the start-task
+form is open the buffer you are looking at is the form:
+
+```lua
+require("tasksd").setup({ auto_save = true })
+```
+
+Unmodified buffers are left alone, so nothing is rebuilt for a timestamp that
+did not need to change. A modified buffer with no file name cannot be written
+and is reported as a warning; the task starts anyway. Commands that do not run
+anything — `send_input`, `send_signal`, `output` — ignore the option.
+
 ### Watching output
 
 ```vim
@@ -428,6 +444,7 @@ require("tasksd").setup({
     auto = true,              -- run a command containing `syntax` through a shell
     syntax = { "&&" },        -- substrings that mean a command needs one
   },
+  auto_save = false,          -- write modified buffers before starting a task
   output = {
     position = "bottom",      -- 'left'|'right'|'top'|'bottom'|'float'
     size = "30%",             -- count of lines/columns, or a percentage
@@ -632,7 +649,7 @@ runs it refuses to start, so a run never quietly skips the integration tests.
 - [x] Auto shell (use `sh -c` if `&&` or any other shell syntax is detected)
 - [x] Repeat/send signal to the last task
 - [x] Check available lua api
-- [ ] CI
+- [x] CI
 - [ ] Documentation
 
 `0.2.0`:
