@@ -5,6 +5,7 @@ local form = require("tasksd.form")
 local last = require("tasksd.last")
 local log = require("tasksd.log")
 local output = require("tasksd.output")
+local save = require("tasksd.save")
 local task = require("tasksd.task")
 
 ---`:Tasksd start_task [working_dir=<dir>] [show_output=<bool>] [shell=<bool>]
@@ -148,6 +149,7 @@ M.start = function(opts)
     log.error(tostring(err))
     return
   end
+  save.all()
   M.send(params)
 end
 

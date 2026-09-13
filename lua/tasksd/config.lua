@@ -38,6 +38,9 @@ M.default = {
     -- literally, not as patterns.
     syntax = { "&&" },
   },
+  -- Whether `start_task` and `repeat_task` write every modified buffer before
+  -- the daemon is asked to run anything; see `tasksd.save`.
+  auto_save = false,
   output = {
     -- Where the output window opens; see `tasksd.output.window`.
     --   'left' | 'right' | 'top' | 'bottom' | 'float'

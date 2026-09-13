@@ -2,6 +2,7 @@ local client = require("tasksd.client")
 local config = require("tasksd.config")
 local last = require("tasksd.last")
 local log = require("tasksd.log")
+local save = require("tasksd.save")
 local start_task = require("tasksd.command.start_task")
 local task = require("tasksd.task")
 local task_picker = require("tasksd.task_picker")
@@ -89,6 +90,10 @@ end
 M.run = function(opts)
   vim.validate("opts", opts, "table", true)
   local force = opts and opts.force
+
+  -- Before the daemon is consulted, so the write is a consequence of the
+  -- keystroke rather than of whatever the listing comes back saying.
+  save.all()
 
   client.get(function(c, connect_err)
     if not c then
